@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 _bmad/scripts/resolve_customization.py --skill .claude/skills/bmad-product-brief --key workflow)",
+      "Bash(python3 _bmad/scripts/resolve_customization.py --skill .claude/skills/bmad-prd --key workflow)",
+      "Bash(python3 _bmad/scripts/resolve_customization.py --skill .claude/skills/bmad-create-ux-design --key workflow)",
+      "Bash(python3 _bmad/scripts/resolve_customization.py --skill .claude/skills/bmad-create-architecture --key workflow)",
+      "Bash(npm run *)",
+      "Bash(git checkout *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(gh pr *)"
+    ]
+  }
+}
