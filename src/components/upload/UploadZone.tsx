@@ -1,96 +1,171 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Upload } from "lucide-react";
+import { useAppState } from "@/store/useAppState";
+import { usePdfDocument } from "@/hooks/usePdfDocument";
+
+type DragState = "idle" | "valid" | "invalid";
+
+function dragValidity(event: React.DragEvent<HTMLDivElement>): DragState {
+  const items = event.dataTransfer?.items;
+  if (!items || items.length === 0) return "valid";
+  // Mark the drag as invalid only when the browser tells us a non-PDF
+  // type. Empty type (common cross-OS) is treated as "valid" — the real
+  // check runs on drop against file metadata.
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (item.kind !== "file") continue;
+    if (item.type && item.type !== "application/pdf") {
+      return "invalid";
+    }
+  }
+  return "valid";
+}
 
 export function UploadZone() {
-  const [isDragOver, setIsDragOver] = useState(false);
+  const { state } = useAppState();
+  const { loadFile } = usePdfDocument();
+  const [dragState, setDragState] = useState<DragState>("idle");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const uploadError = state.ui.uploadError;
+  const showError = uploadError !== null;
+
+  const openPicker = () => fileInputRef.current?.click();
+
+  const handleDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragState(dragValidity(event));
+  };
 
   const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    setIsDragOver(true);
+    // dragover fires constantly during a drag; keep state in sync without
+    // an unnecessary re-render when validity hasn't changed.
+    const next = dragValidity(event);
+    if (next !== dragState) setDragState(next);
   };
 
   const handleDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    setIsDragOver(false);
+    setDragState("idle");
   };
 
   const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    setIsDragOver(false);
+    setDragState("idle");
+    const file = event.dataTransfer.files?.[0];
+    if (file) void loadFile(file);
   };
+
+  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) void loadFile(file);
+    // Reset so the same file can be re-selected and re-fire onChange.
+    event.target.value = "";
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openPicker();
+    }
+  };
+
+  const borderColor = showError
+    ? "var(--color-danger)"
+    : dragState === "invalid"
+      ? "var(--color-danger)"
+      : dragState === "valid"
+        ? "var(--color-accent)"
+        : "var(--color-border)";
+
+  const backgroundColor =
+    showError || dragState === "invalid"
+      ? "rgba(220, 38, 38, 0.06)"
+      : dragState === "valid"
+        ? "var(--color-overlay-bg)"
+        : "var(--color-surface)";
 
   return (
     <section
       className="flex flex-1 items-center justify-center px-6 py-12"
       aria-labelledby="upload-zone-heading"
     >
-      <div
-        role="button"
-        tabIndex={0}
-        aria-label="Upload a PDF — drop a file or click to browse"
-        onDragOver={handleDragOver}
-        onDragEnter={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        className={`
-          flex w-full max-w-xl flex-col items-center justify-center
-          gap-4 rounded-lg border-2 border-dashed bg-surface
-          px-8 py-16 text-center transition-colors
-          focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
-          ${
-            isDragOver
-              ? "border-accent bg-overlay-bg"
-              : "border-[color:var(--color-border)]"
-          }
-        `}
-        style={{
-          backgroundColor: isDragOver
-            ? "var(--color-overlay-bg)"
-            : "var(--color-surface)",
-          borderColor: isDragOver
-            ? "var(--color-accent)"
-            : "var(--color-border)",
-        }}
-      >
-        <Upload
-          aria-hidden="true"
-          className="h-10 w-10"
-          style={{ color: "var(--color-text-muted)" }}
-        />
-
-        <h1
-          id="upload-zone-heading"
-          className="text-lg font-medium"
-          style={{ color: "var(--color-text-primary)" }}
+      <div className="w-full max-w-xl">
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label="Upload a PDF — drop a file or click to browse"
+          onClick={openPicker}
+          onKeyDown={handleKeyDown}
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className="flex w-full flex-col items-center justify-center
+            gap-4 rounded-lg border-2 border-dashed px-8 py-16 text-center
+            transition-colors cursor-pointer
+            focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          style={{ backgroundColor, borderColor }}
         >
-          Drop your PDF here
-        </h1>
+          <Upload
+            aria-hidden="true"
+            className="h-10 w-10"
+            style={{ color: "var(--color-text-muted)" }}
+          />
 
-        <p style={{ color: "var(--color-text-muted)" }}>
-          or{" "}
-          <button
-            type="button"
-            disabled
-            aria-disabled="true"
-            className="rounded px-3 py-1.5 font-medium"
-            style={{
-              backgroundColor: "var(--color-accent)",
-              color: "var(--color-surface)",
-              opacity: 0.95,
-            }}
+          <h1
+            id="upload-zone-heading"
+            className="text-lg font-medium"
+            style={{ color: "var(--color-text-primary)" }}
           >
-            Browse files
-          </button>
-        </p>
+            Drop your PDF here
+          </h1>
 
-        <p
-          className="text-xs"
-          style={{ color: "var(--color-text-muted)" }}
-        >
-          PDF files only · Max 25 MB
-        </p>
+          <p style={{ color: "var(--color-text-muted)" }}>
+            or{" "}
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                openPicker();
+              }}
+              className="rounded px-3 py-1.5 font-medium cursor-pointer"
+              style={{
+                backgroundColor: "var(--color-accent)",
+                color: "var(--color-surface)",
+              }}
+            >
+              Browse files
+            </button>
+          </p>
+
+          {showError ? (
+            <p
+              role="alert"
+              className="text-sm"
+              style={{ color: "var(--color-danger)" }}
+            >
+              {uploadError}
+            </p>
+          ) : (
+            <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+              PDF files only · Max 25 MB
+            </p>
+          )}
+        </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/pdf,.pdf"
+          className="hidden"
+          onChange={handleInputChange}
+          aria-hidden="true"
+          tabIndex={-1}
+        />
       </div>
     </section>
   );
