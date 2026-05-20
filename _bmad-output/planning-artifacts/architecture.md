@@ -288,7 +288,7 @@ export type AppAction =
   | { type: 'SIGNATURE_CREATED'; payload: { dataUrl: string; type: 'drawn' | 'typed' } }
   | { type: 'SIGNATURE_MODAL_OPEN' }
   | { type: 'SIGNATURE_MODAL_CLOSE' }
-  | { type: 'OVERLAY_ADDED'; payload: Omit<Overlay, 'id'> }
+  | { type: 'OVERLAY_ADDED'; payload: Overlay }   // id minted at dispatch site by createOverlay() — reducer stays pure
   | { type: 'OVERLAY_MOVED'; payload: { id: string; x: number; y: number } }
   | { type: 'OVERLAY_RESIZED'; payload: { id: string; x: number; y: number; width: number; height: number } }
   | { type: 'OVERLAY_DELETED'; payload: { id: string } }
