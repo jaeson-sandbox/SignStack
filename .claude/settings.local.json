@@ -12,7 +12,10 @@
       "Bash(git push *)",
       "Bash(gh pr *)",
       "Bash(git pull *)",
-      "Bash(python3 *)"
+      "Bash(python3 *)",
+      "Bash(npm --version)",
+      "Bash(npm install *)",
+      "Bash(npm test *)"
     ]
   }
 }
