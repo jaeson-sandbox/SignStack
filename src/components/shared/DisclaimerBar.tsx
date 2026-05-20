@@ -12,7 +12,7 @@ export function DisclaimerBar() {
         fontSize: "var(--font-size-xs)",
       }}
     >
-      <div className="mx-auto flex max-w-5xl items-center gap-2">
+      <div className="mx-auto flex max-w-5xl items-center justify-center gap-2">
         <Lock aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
         <p>
           <span className="font-medium">Local only ·</span>{" "}
