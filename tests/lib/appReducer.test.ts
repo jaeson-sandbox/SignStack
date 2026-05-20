@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appReducer, initialState } from "@/store/appReducer";
+import { appReducer, createOverlay, initialState } from "@/store/appReducer";
 import type { AppState, Overlay } from "@/types";
 
 function makeStateWithOverlays(overlays: Overlay[]): AppState {
@@ -195,16 +195,52 @@ describe("appReducer — SIGNATURE_CREATED / modal", () => {
 });
 
 describe("appReducer — OVERLAY_ADDED", () => {
-  it("appends an overlay with a freshly generated UUID id", () => {
+  it("appends the supplied overlay verbatim (reducer does not mint ids)", () => {
+    const overlay = makeOverlay({
+      id: "fixed-id-1",
+      pageIndex: 0,
+      x: 10,
+      y: 20,
+      width: 200,
+      height: 80,
+    });
     const next = appReducer(initialState, {
       type: "OVERLAY_ADDED",
-      payload: { pageIndex: 0, x: 10, y: 20, width: 200, height: 80 },
+      payload: overlay,
     });
-    expect(next.overlays).toHaveLength(1);
-    expect(next.overlays[0].id).toMatch(
+    expect(next.overlays).toEqual([overlay]);
+    // Same input → same output (determinism check).
+    const next2 = appReducer(initialState, {
+      type: "OVERLAY_ADDED",
+      payload: overlay,
+    });
+    expect(next2).toEqual(next);
+  });
+
+  it("appends to existing overlays without mutating the prior array", () => {
+    const a = makeOverlay({ id: "a" });
+    const seeded = makeStateWithOverlays([a]);
+    const b = makeOverlay({ id: "b", x: 50 });
+    const next = appReducer(seeded, { type: "OVERLAY_ADDED", payload: b });
+    expect(next.overlays).toEqual([a, b]);
+    expect(seeded.overlays).toEqual([a]);
+    expect(next.overlays).not.toBe(seeded.overlays);
+  });
+});
+
+describe("createOverlay factory", () => {
+  it("returns an overlay with a v4-shaped UUID id and the supplied fields", () => {
+    const overlay = createOverlay({
+      pageIndex: 0,
+      x: 10,
+      y: 20,
+      width: 200,
+      height: 80,
+    });
+    expect(overlay.id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
     );
-    expect(next.overlays[0]).toMatchObject({
+    expect(overlay).toMatchObject({
       pageIndex: 0,
       x: 10,
       y: 20,
@@ -213,17 +249,10 @@ describe("appReducer — OVERLAY_ADDED", () => {
     });
   });
 
-  it("generates a unique id for each add", () => {
-    const after1 = appReducer(initialState, {
-      type: "OVERLAY_ADDED",
-      payload: { pageIndex: 0, x: 0, y: 0, width: 100, height: 40 },
-    });
-    const after2 = appReducer(after1, {
-      type: "OVERLAY_ADDED",
-      payload: { pageIndex: 0, x: 50, y: 50, width: 100, height: 40 },
-    });
-    expect(after2.overlays).toHaveLength(2);
-    expect(after2.overlays[0].id).not.toBe(after2.overlays[1].id);
+  it("generates a unique id on each call", () => {
+    const a = createOverlay({ pageIndex: 0, x: 0, y: 0, width: 1, height: 1 });
+    const b = createOverlay({ pageIndex: 0, x: 0, y: 0, width: 1, height: 1 });
+    expect(a.id).not.toBe(b.id);
   });
 });
 

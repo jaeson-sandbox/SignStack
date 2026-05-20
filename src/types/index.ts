@@ -57,7 +57,7 @@ export type AppAction =
     }
   | { type: "SIGNATURE_MODAL_OPEN" }
   | { type: "SIGNATURE_MODAL_CLOSE" }
-  | { type: "OVERLAY_ADDED"; payload: Omit<Overlay, "id"> }
+  | { type: "OVERLAY_ADDED"; payload: Overlay }
   | { type: "OVERLAY_MOVED"; payload: { id: string; x: number; y: number } }
   | {
       type: "OVERLAY_RESIZED";

@@ -28,6 +28,14 @@ function setMapEntry<V>(map: Map<number, V>, key: number, value: V): Map<number,
   return next;
 }
 
+/**
+ * Mint a fresh overlay with a UUID id. Call this at the dispatch site
+ * so the reducer stays fully deterministic (pure).
+ */
+export function createOverlay(partial: Omit<Overlay, "id">): Overlay {
+  return { id: crypto.randomUUID(), ...partial };
+}
+
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case "DOCUMENT_LOADED": {
@@ -96,8 +104,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     }
 
     case "OVERLAY_ADDED": {
-      const overlay: Overlay = { id: crypto.randomUUID(), ...action.payload };
-      return { ...state, overlays: [...state.overlays, overlay] };
+      return { ...state, overlays: [...state.overlays, action.payload] };
     }
 
     case "OVERLAY_MOVED": {
