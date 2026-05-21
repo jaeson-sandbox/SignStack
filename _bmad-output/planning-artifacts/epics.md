@@ -1729,8 +1729,185 @@ Then Chrome 110+, Firefox 110+, and Safari 16+ desktop are listed.
 
 ## Roadmap Context (Out of Scope for MVP 1)
 
-The following are referenced in Phase 2 and Phase 3 of the Product Brief. They must not be implemented in any MVP 1 story:
+The following are referenced in Phase 2 and Phase 3 of the Product Brief and are documented here so the team can reason about architectural fit while building MVP 1. **None of these are MVP 1 work — MVP 1 remains visual PDF signing only.** No story in this section may be implemented until MVP 1 ships and the relevant phase is formally opened (own PRD iteration, own architecture pass).
 
-**Phase 2 — Fill-out Overlays:** Text box, date field, and checkmark overlays placed on PDF pages.
-**Phase 3 — Combine PDFs:** Multi-document upload, page reordering, PDF merge and export.
-**Post-MVP:** User accounts, signature library, save-draft, mobile-optimized layout, thumbnail navigation, payments, cloud storage.
+### Guardrail: native PDF text is not edited
+
+True editing of existing PDF text (parsing the content stream, mutating glyphs, reflowing layout, replacing fonts) is **explicitly out of roadmap scope** at every phase below. If a user needs to visually alter existing text, the answer is:
+
+- Phase 2's text-box overlay (place new text over the original), or
+- A future whiteout/replacement-overlay workflow (a filled rectangle plus a text overlay on top — still purely additive, never touches the source content stream).
+
+This guardrail exists because native PDF text mutation needs a font-substitution + reflow engine (or risks producing visually broken files), and that complexity is not aligned with SignStack's "local, browser-first, simple" identity. Reconsider only if the overlay workflow proves insufficient in practice.
+
+---
+
+## Phase 2 — Fill-Out Overlay Tools (post-MVP 1)
+
+**Status:** Not started. Do not implement until MVP 1 ships and Phase 2 is formally opened.
+
+**Premise:** The MVP 1 overlay model (drag, resize, delete, embed via `pdf-lib`) generalizes from "signature image" to "any addressable content." Phase 2 reuses that model for text, date, and checkmark overlays — no new infrastructure, only new overlay types and editors.
+
+**Architectural prerequisites already in place from MVP 1:**
+- `Overlay` interface (`src/types/index.ts`) — will grow a discriminator union: `type: "signature" | "text" | "date" | "checkmark"` plus per-type payload.
+- Coordinate mapper (Story 4.1) — Phase 2 reuses the same screen-px → PDF-pt conversion.
+- React-rnd-based overlay component (Story 5.4) — generalize so children render per overlay type.
+- pdf-lib export pipeline (Story 6.1) — extend to call `page.drawText` or `page.drawImage` based on overlay type.
+
+### Future Story P2.1: Add Text Box Overlay
+
+As a user filling out a form,
+I want to drop a text box on the current PDF page and type into it,
+So that I can fill blank fields without re-creating the document.
+
+**Product Value:** Closes the most common form-fill use case (rental applications, intake forms, invoices). Removes the need to print → handwrite → scan.
+
+**Scope:**
+- User adds a text box via a Phase-2 toolbar entry (e.g., `+ Text`); it lands on `state.currentVisiblePageIndex` with a default size at the bottom-right quadrant (mirrors Story 5.1's signature placement).
+- Text box uses the **same Overlay model** as signatures — `id`, `pageIndex`, `x`, `y`, `width`, `height` — plus a discriminator and `text: string`.
+- Selection, move, resize, delete: identical to signature overlay (Story 5.4 / Story 5.5 keyboard nudge / Story 5.3 delete).
+- Inline editing: double-click (or single-click when already selected) opens a contenteditable / `<textarea>` inside the overlay.
+- Text content stored in app state (`overlays[].text`).
+- Export via `pdf-lib`'s `page.drawText(text, { x, y, font, size, color })` — font is a single bundled `StandardFonts.Helvetica` (or user-selectable later).
+
+**Out of scope (this story):**
+- Editing native PDF text or AcroForm fields.
+- Multi-font / rich-text formatting.
+- OCR or AI extraction.
+- Server-side processing.
+- Font selection (defer to a follow-up story).
+
+**Architectural notes:**
+- Adds a new action: `OVERLAY_TEXT_EDITED { id, text }`. No new reducer cases for move/resize/delete — they're shared.
+- Coordinate conversion (screen px → PDF pt) reuses `coordinateMapper.ts` unchanged.
+- Font baseline matters: pdf-lib's `drawText` y is the baseline, not the top — the existing y-flip in `coordinateMapper` will need a baseline adjustment specific to text. Document this in the Phase 2 architecture pass.
+
+**Depends on:** MVP 1 shipped (Epics 4, 5, 6 complete).
+
+---
+
+### Future Story P2.2: Add Date Overlay
+
+As a user filling out a form,
+I want to drop a date stamp on the current PDF page,
+So that I can fill the "Date" line without manually typing today's date for the Nth time.
+
+**Product Value:** Tiny ergonomic win that shows up on almost every signable form.
+
+**Scope:**
+- User adds a date overlay via a Phase-2 toolbar entry (e.g., `+ Date`).
+- Same Overlay model + discriminator (`type: "date"`) + payload `{ isoDate: string; format: "MM/DD/YYYY" | "YYYY-MM-DD" | "DD MMM YYYY" }`.
+- Default value: today's local date.
+- Inline editor: small popover with a date input + format selector.
+- Move / resize / delete: same as signature overlay.
+- Export via `pdf-lib`'s `page.drawText` (rendered as formatted string).
+
+**Out of scope:** time-of-day, timezone selection, locale-aware month names beyond a fixed list, signed/tamper-evident timestamps.
+
+**Architectural notes:**
+- Date formatting is a pure utility (`src/lib/format/date.ts`). No external date library required — Intl APIs cover MVP needs.
+- Reuses the same `OVERLAY_TEXT_EDITED`-style action (or introduces `OVERLAY_DATE_EDITED { id, isoDate, format }`); decide during the Phase 2 architecture pass.
+
+**Depends on:** P2.1 (establishes the overlay-type discriminator pattern).
+
+---
+
+### Future Story P2.3: Add Checkmark Overlay
+
+As a user filling out a checkbox,
+I want to drop a checkmark on the current PDF page,
+So that I can mark "yes" on a printed form without printing it.
+
+**Product Value:** Required to fully cover the form-fill use case (no form is complete without checkboxes).
+
+**Scope:**
+- User adds a checkmark via a Phase-2 toolbar entry (e.g., `+ Check`).
+- Same Overlay model + discriminator (`type: "checkmark"`) — no editable payload, the checkmark is a fixed glyph.
+- Default size: small square (~24×24 px), positioned at the page's default placement quadrant.
+- Move / delete: same as signature overlay. Resize allowed but uniformly scaled.
+- Render: a centered checkmark glyph (Unicode `✓` or an SVG path embedded in a `<canvas>` → PNG).
+- Export via `pdf-lib`'s `page.drawText("✓", ...)` **or** `page.drawSvgPath(...)` — decide during the Phase 2 architecture pass based on font availability.
+
+**Out of scope:** alternate marks (X, dot, filled square — defer until requested), color picker.
+
+**Architectural notes:**
+- If `drawText("✓", ...)` is used, ensure the standard font set (`standardFontDataUrl` from Story 3.2) covers the codepoint. The Foxit / Liberation fonts mirrored under `public/standard_fonts/` cover U+2713; verify at implementation time.
+
+**Depends on:** P2.1.
+
+---
+
+### Future Story P2.4: Export Fill-Out Overlays
+
+As a user finishing a filled-out form,
+I want the downloaded PDF to contain all my text, date, and checkmark overlays,
+So that the recipient sees the completed document, not the blank original.
+
+**Product Value:** Closes the Phase 2 loop — without export, the overlays are local-only and worthless.
+
+**Scope:**
+- Extend `pdfExporter.ts` to switch on `overlay.type` and call the appropriate `pdf-lib` primitive (`drawImage` for signatures, `drawText` for text/date/checkmark).
+- Reuse the same `coordinateMapper.ts` (screen px → PDF pt) for all overlay types. Text baseline adjustment per P2.1.
+- Output filename and download flow unchanged from MVP 1's Story 6.1.
+- Add tests for each overlay-type export branch where practical.
+
+**Out of scope:** any visual change to the editor (already covered by P2.1–P2.3).
+
+**Architectural notes:**
+- Export is the only place where Phase 2 logic differs from MVP 1's per-overlay-type loop. Keep the switch isolated to `pdfExporter.ts` — overlay components stay type-agnostic where possible.
+
+**Depends on:** P2.1, P2.2, P2.3.
+
+---
+
+## Future Story: Copy Existing PDF Text (post-MVP 1)
+
+**Status:** Not started. Independent of Phase 2 (can land before, after, or in parallel once MVP 1 ships).
+
+As a user reviewing a PDF in SignStack,
+I want to select visible PDF text with the mouse and copy it (Ctrl+C),
+So that I can paste it elsewhere the same way I can in Chrome's built-in PDF viewer.
+
+**Product Value:** Removes a major friction surfaced by anyone who opens a PDF expecting browser-default behavior. Today SignStack silently fails this expectation — selectable text isn't selectable because the text layer is disabled.
+
+**Scope:**
+- Re-enable react-pdf's **text layer** (currently `renderTextLayer={false}` in `PDFPageRenderer.tsx`) for pages where the PDF actually contains selectable text.
+- Native browser selection + Ctrl+C must work end-to-end — no custom selection model, no custom clipboard handler unless react-pdf's text layer proves insufficient.
+- If a page has no selectable text (scanned / image-only PDF), do **not** claim copying is available — the text layer simply renders nothing and selection silently does nothing, matching Chrome's behavior.
+- Must not interfere with signature overlay selection / dragging (Story 5.x).
+- Must not interfere with future Phase 2 text-box overlay selection / dragging.
+
+**Out of scope:**
+- True editing of existing PDF text. (See "Guardrail: native PDF text is not edited" above.)
+- OCR for scanned PDFs.
+- AI text extraction or summarization.
+- Server-side text extraction.
+- Native PDF text mutation.
+- Selection across pages.
+
+**Architectural notes:**
+- **Prefer react-pdf's text layer** before introducing any custom text extraction. It uses pdfjs's structured text data and renders an invisible-but-selectable HTML overlay aligned with the canvas. This is the same mechanism Chrome's PDF viewer uses.
+- Re-enabling it requires importing `react-pdf/dist/Page/TextLayer.css` (deferred in Story 3.2) and re-rendering pages — no new dependencies.
+- **Interaction order matters.** Browser text selection and react-rnd drag are both `mousedown` consumers. Likely solution: a small editor-mode model — `"select" | "sign" | "text" | "copy"` — where:
+  - In `copy` mode, the text layer is enabled and overlay components ignore `mousedown` events (pointer-events: none on overlay handles).
+  - In `sign` / `text` / `select` modes, the text layer is disabled or `pointer-events: none`, and overlays own the gestures.
+  - Default mode is `select` (today's behavior).
+- Editor-mode state lives on `AppState` (e.g. `state.ui.editorMode`). Single source of truth.
+- **Do not introduce a separate PDF parsing pipeline** (e.g. directly calling `pdfjs.getDocument().getPage().getTextContent()`) unless react-pdf's text layer proves insufficient. The text layer already does this internally; reimplementing it would duplicate work and risk diverging from pdfjs's positioning math.
+- Local-first / browser-only: no network egress, no clipboard upload, no analytics on copied content. Standard browser clipboard APIs only.
+
+**Depends on:** MVP 1 shipped. Loose dependency on Phase 2 — if Phase 2's text-box overlay lands first, the editor-mode model should be designed jointly so `text` (place a text box) and `copy` (select existing text) coexist cleanly.
+
+---
+
+## Phase 3 — Combine PDFs (post-Phase 2)
+
+**Status:** Not started. Requires its own PRD iteration and architecture pass.
+
+Multi-document upload, page reordering across documents, and pdf-lib-based merge and export. Out of scope until Phase 2 ships and Phase 3 is formally opened.
+
+---
+
+## Post-MVP (no phase commitment)
+
+User accounts, signature library, save-draft, mobile-optimized layout, thumbnail navigation, payments, cloud storage. These are not on any roadmap — listed only to make it explicit that they are **not** what SignStack is becoming.
