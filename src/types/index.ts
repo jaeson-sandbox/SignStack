@@ -34,6 +34,8 @@ export interface AppState {
   signature: SignatureState;
   overlays: Overlay[];
   selectedOverlayId: string | null;
+  /** 0-based index of the page with the largest viewport intersection ratio. */
+  currentVisiblePageIndex: number | null;
   ui: UIState;
 }
 
@@ -65,6 +67,7 @@ export type AppAction =
     }
   | { type: "OVERLAY_DELETED"; payload: { id: string } }
   | { type: "OVERLAY_SELECTED"; payload: { id: string | null } }
+  | { type: "CURRENT_PAGE_CHANGED"; payload: { pageIndex: number | null } }
   | { type: "EXPORT_START" }
   | { type: "EXPORT_SUCCESS" }
   | { type: "EXPORT_ERROR"; payload: { message: string } }

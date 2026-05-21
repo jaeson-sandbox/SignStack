@@ -31,6 +31,7 @@ describe("appReducer — initialState", () => {
     expect(initialState.signature.type).toBeNull();
     expect(initialState.overlays).toEqual([]);
     expect(initialState.selectedOverlayId).toBeNull();
+    expect(initialState.currentVisiblePageIndex).toBeNull();
   });
 
   it("has all UI flags false and errors null", () => {
@@ -397,5 +398,52 @@ describe("appReducer — UPLOAD_ERROR / UPLOAD_ERROR_CLEAR", () => {
     };
     const next = appReducer(seeded, { type: "UPLOAD_ERROR_CLEAR" });
     expect(next.ui.uploadError).toBeNull();
+  });
+});
+
+describe("appReducer — CURRENT_PAGE_CHANGED", () => {
+  it("sets currentVisiblePageIndex to the given page index", () => {
+    const next = appReducer(initialState, {
+      type: "CURRENT_PAGE_CHANGED",
+      payload: { pageIndex: 7 },
+    });
+    expect(next.currentVisiblePageIndex).toBe(7);
+  });
+
+  it("accepts null to clear the current page", () => {
+    const seeded: AppState = { ...initialState, currentVisiblePageIndex: 3 };
+    const next = appReducer(seeded, {
+      type: "CURRENT_PAGE_CHANGED",
+      payload: { pageIndex: null },
+    });
+    expect(next.currentVisiblePageIndex).toBeNull();
+  });
+
+  it("does not touch other state slices", () => {
+    const overlay = makeOverlay({ id: "keep-me" });
+    const seeded: AppState = {
+      ...initialState,
+      overlays: [overlay],
+      selectedOverlayId: "keep-me",
+    };
+    const next = appReducer(seeded, {
+      type: "CURRENT_PAGE_CHANGED",
+      payload: { pageIndex: 2 },
+    });
+    expect(next.overlays).toBe(seeded.overlays);
+    expect(next.selectedOverlayId).toBe("keep-me");
+    expect(next.document).toBe(seeded.document);
+  });
+});
+
+describe("appReducer — DOCUMENT_LOADED resets currentVisiblePageIndex", () => {
+  it("clears a previously-set currentVisiblePageIndex when a new document loads", () => {
+    const seeded: AppState = { ...initialState, currentVisiblePageIndex: 5 };
+    const file = new File(["%PDF-1.7"], "doc.pdf", { type: "application/pdf" });
+    const next = appReducer(seeded, {
+      type: "DOCUMENT_LOADED",
+      payload: { file, arrayBuffer: new ArrayBuffer(8), pageCount: 3 },
+    });
+    expect(next.currentVisiblePageIndex).toBeNull();
   });
 });
