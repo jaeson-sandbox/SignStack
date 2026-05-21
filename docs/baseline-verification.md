@@ -137,16 +137,15 @@ All four primitives are confirmed available. The trimmed signature canvas path (
 
 ## Risks and follow-ups
 
-### R-1 — pdfjs-dist version mismatch (high — must resolve before Story 2.2)
+### R-1 — pdfjs-dist version mismatch (RESOLVED in Story 3.1)
 
 Top-level `pdfjs-dist@5.7.284` is hoisted, but `react-pdf@10.4.1` keeps its own nested `pdfjs-dist@5.4.296`. PDF.js refuses to run when the API and worker versions disagree.
 
-**Decision for Story 2.2:**
-- Always import `pdfjs` from `react-pdf`, never from `pdfjs-dist` directly.
-- Copy the worker from `node_modules/react-pdf/node_modules/pdfjs-dist/build/pdf.worker.min.mjs` (the nested copy) into `public/pdf.worker.min.mjs` at build time (a `postinstall` script or a checked-in copy that we re-verify on dep bumps).
-- Optionally consider pinning the top-level `pdfjs-dist` to whatever react-pdf carries, so it can be hoisted to a single deduped copy.
-
-Out of scope for Story 1.1.
+**Resolution (Story 3.1):**
+- `pdfjs` is always imported from `react-pdf` (never from `pdfjs-dist` directly) — see `src/lib/pdf/pdfWorker.ts`.
+- `public/pdf.worker.min.mjs` is a checked-in copy of `node_modules/react-pdf/node_modules/pdfjs-dist/build/pdf.worker.min.mjs` (5.4.296) — the **nested** copy, to guarantee API↔worker version alignment.
+- `pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'` is set as a module side effect, imported once at the client root (`src/store/AppProvider.tsx`), so it runs before any `<Document>` mounts.
+- **Refresh procedure on `react-pdf` bumps:** `Copy-Item node_modules/react-pdf/node_modules/pdfjs-dist/build/pdf.worker.min.mjs public/pdf.worker.min.mjs -Force` (PowerShell) or `cp` equivalent. The Vitest assertion in `tests/lib/pdfWorker.test.ts` will catch missing or stale config but does not verify the on-disk worker file matches; verify manually after any react-pdf upgrade.
 
 ### R-2 — react-signature-canvas is an alpha pre-release
 
@@ -164,9 +163,9 @@ Turbopack is default in v16. Anything in `src/lib/pdf/*` or `src/lib/signature/*
 
 A Server Component cannot use `dynamic(..., { ssr: false })`. Architecture's "PDFScrollArea, SignatureModal, etc. all dynamic-imported with `ssr: false`" must be done from a Client Component wrapper (the `'use client'` page or layout segment). Document this in any story that introduces a new PDF surface.
 
-### R-6 — `react-pdf` auto-sets a broken `workerSrc` on import
+### R-6 — `react-pdf` auto-sets a broken `workerSrc` on import (RESOLVED in Story 3.1)
 
-`react-pdf/dist/index.js` line 12 sets `pdfjs.GlobalWorkerOptions.workerSrc = 'pdf.worker.mjs'` (a bare URL that won't resolve under a Next.js public path). We must override this **before** the first `<Document>` renders. Story 2.2 should do this in a module-scope side effect or a `useEffect` of the first PDF-consuming component.
+`react-pdf/dist/index.js` line 12 sets `pdfjs.GlobalWorkerOptions.workerSrc = 'pdf.worker.mjs'` (a bare URL that won't resolve under a Next.js public path). Overridden in `src/lib/pdf/pdfWorker.ts`, imported at the client root in `src/store/AppProvider.tsx`. The override runs as a module side effect, so it executes before any consumer renders a `<Document>`.
 
 ---
 
