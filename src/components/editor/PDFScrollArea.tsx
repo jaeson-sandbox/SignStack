@@ -9,6 +9,7 @@ import "@/lib/pdf/pdfWorker";
 import { useCallback, useMemo, useState } from "react";
 import { Document } from "react-pdf";
 import { useAppState } from "@/store/useAppState";
+import { PDF_DOCUMENT_OPTIONS } from "@/lib/pdf/pdfOptions";
 import { PDFPageRenderer } from "./PDFPageRenderer";
 
 // Structural-only — avoids importing PDFDocumentProxy from top-level pdfjs-dist
@@ -59,7 +60,11 @@ export function PDFScrollArea() {
         className="mx-auto flex flex-col gap-6"
         style={{ width: CONTAINER_WIDTH_PX }}
       >
-        <Document file={fileProp} onLoadSuccess={handleLoadSuccess}>
+        <Document
+          file={fileProp}
+          options={PDF_DOCUMENT_OPTIONS}
+          onLoadSuccess={handleLoadSuccess}
+        >
           {numPages !== null
             ? Array.from({ length: numPages }, (_, index) => (
                 <PDFPageRenderer

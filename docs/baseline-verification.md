@@ -137,15 +137,22 @@ All four primitives are confirmed available. The trimmed signature canvas path (
 
 ## Risks and follow-ups
 
-### R-1 — pdfjs-dist version mismatch (RESOLVED in Story 3.1)
+### R-1 — pdfjs-dist version mismatch (RESOLVED in Story 3.1, extended in Story 3.2)
 
-Top-level `pdfjs-dist@5.7.284` is hoisted, but `react-pdf@10.4.1` keeps its own nested `pdfjs-dist@5.4.296`. PDF.js refuses to run when the API and worker versions disagree.
+Top-level `pdfjs-dist@5.7.284` is hoisted, but `react-pdf@10.4.1` keeps its own nested `pdfjs-dist@5.4.296`. PDF.js refuses to run when the API and worker (or any companion asset) versions disagree.
 
-**Resolution (Story 3.1):**
+**Resolution:**
 - `pdfjs` is always imported from `react-pdf` (never from `pdfjs-dist` directly) — see `src/lib/pdf/pdfWorker.ts`.
-- `public/pdf.worker.min.mjs` is a checked-in copy of `node_modules/react-pdf/node_modules/pdfjs-dist/build/pdf.worker.min.mjs` (5.4.296) — the **nested** copy, to guarantee API↔worker version alignment.
-- `pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'` is set as a module side effect, imported once at the client root (`src/store/AppProvider.tsx`), so it runs before any `<Document>` mounts.
-- **Refresh procedure on `react-pdf` bumps:** `Copy-Item node_modules/react-pdf/node_modules/pdfjs-dist/build/pdf.worker.min.mjs public/pdf.worker.min.mjs -Force` (PowerShell) or `cp` equivalent. The Vitest assertion in `tests/lib/pdfWorker.test.ts` will catch missing or stale config but does not verify the on-disk worker file matches; verify manually after any react-pdf upgrade.
+- **All pdfjs runtime assets are checked-in copies of the nested `react-pdf/node_modules/pdfjs-dist` package** to guarantee API↔asset version alignment. Two assets are mirrored under `public/`:
+  - `public/pdf.worker.min.mjs` — copied from `node_modules/react-pdf/node_modules/pdfjs-dist/build/pdf.worker.min.mjs`. Wired up by `src/lib/pdf/pdfWorker.ts` as `pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'`, co-imported by `src/components/editor/PDFScrollArea.tsx`.
+  - `public/standard_fonts/` — recursive copy of `node_modules/react-pdf/node_modules/pdfjs-dist/standard_fonts/` (16 files / ~780 KB: Foxit + Liberation typefaces + licenses). Wired up via `PDF_DOCUMENT_OPTIONS = { standardFontDataUrl: "/standard_fonts/" }` in `src/lib/pdf/pdfOptions.ts`, passed to `<Document options={...}>`. Without these, pdfjs logs `UnknownErrorException: Ensure that the standardFontDataUrl API parameter is provided` whenever a PDF references a standard PostScript font.
+- **No CDN.** Both assets live in `public/` and are served from the app's own origin. Honors FR-20 / NFR-PV1 (no third-party network egress while a PDF is open).
+- **Refresh procedure on `react-pdf` bumps:**
+  ```powershell
+  Copy-Item node_modules/react-pdf/node_modules/pdfjs-dist/build/pdf.worker.min.mjs public/pdf.worker.min.mjs -Force
+  Copy-Item node_modules/react-pdf/node_modules/pdfjs-dist/standard_fonts public/standard_fonts -Recurse -Force
+  ```
+  The Vitest assertions in `tests/lib/pdfWorker.test.ts` and `tests/lib/pdfOptions.test.ts` catch missing or wrong configuration but do **not** verify the on-disk files match what react-pdf shipped. Re-run the copy procedure after every `react-pdf` upgrade and spot-check a real PDF in the browser.
 
 ### R-2 — react-signature-canvas is an alpha pre-release
 
