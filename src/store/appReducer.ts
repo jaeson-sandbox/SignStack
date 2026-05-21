@@ -14,6 +14,7 @@ export const initialState: AppState = {
   },
   overlays: [],
   selectedOverlayId: null,
+  currentVisiblePageIndex: null,
   ui: {
     isSignatureModalOpen: false,
     isExporting: false,
@@ -51,6 +52,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         },
         overlays: [],
         selectedOverlayId: null,
+        currentVisiblePageIndex: null,
         ui: { ...state.ui, uploadError: null },
       };
     }
@@ -136,6 +138,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 
     case "OVERLAY_SELECTED": {
       return { ...state, selectedOverlayId: action.payload.id };
+    }
+
+    case "CURRENT_PAGE_CHANGED": {
+      return { ...state, currentVisiblePageIndex: action.payload.pageIndex };
     }
 
     case "EXPORT_START": {
