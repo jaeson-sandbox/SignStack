@@ -1,18 +1,19 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useRef } from "react";
 import { Page } from "react-pdf";
+import type { PageMeasurementInput } from "@/lib/pdf/pageDimensions";
 
 interface PDFPageRendererProps {
   pageNumber: number;
   containerWidth: number;
   /**
-   * Fired with the rendered wrapper height (px) once react-pdf paints the
-   * page canvas. Used by the lazy renderer to replace the default
-   * placeholder height with the page's real height so the scrollbar
-   * doesn't jump when the page swaps in/out.
+   * Fired once react-pdf finishes painting the canvas. Receives the full
+   * `PageCallback` from react-pdf (narrowed to `PageMeasurementInput`) so
+   * the parent can pull both rendered-px and intrinsic-pt dimensions from
+   * the same object — no second `getPage()` round-trip, no DOM read.
    */
-  onRenderSuccess?: (renderedHeightPx: number) => void;
+  onRenderSuccess?: (page: PageMeasurementInput) => void;
 }
 
 export function PDFPageRenderer({
@@ -21,16 +22,6 @@ export function PDFPageRenderer({
   onRenderSuccess,
 }: PDFPageRendererProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
-
-  const handleRenderSuccess = useCallback(() => {
-    if (!onRenderSuccess) return;
-    // Wait one frame so layout reflects the canvas's painted height.
-    requestAnimationFrame(() => {
-      if (wrapperRef.current) {
-        onRenderSuccess(wrapperRef.current.clientHeight);
-      }
-    });
-  }, [onRenderSuccess]);
 
   return (
     <div
@@ -46,7 +37,7 @@ export function PDFPageRenderer({
         width={containerWidth}
         renderTextLayer={false}
         renderAnnotationLayer={false}
-        onRenderSuccess={handleRenderSuccess}
+        onRenderSuccess={onRenderSuccess}
       />
     </div>
   );
