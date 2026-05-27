@@ -5,6 +5,7 @@ import { useAppState } from "@/store/useAppState";
 import { UploadZone } from "@/components/upload/UploadZone";
 import { DisclaimerBar } from "@/components/shared/DisclaimerBar";
 import { EditorToolbar } from "@/components/editor/EditorToolbar";
+import { SignatureModal } from "@/components/signature/SignatureModal";
 
 // PDFScrollArea owns react-pdf + the pdfjs worker config. Dynamic import with
 // ssr:false keeps the entire react-pdf module graph (which references browser
@@ -33,6 +34,8 @@ export function AppShell() {
       <EditorToolbar />
       <PDFScrollArea />
       <DisclaimerBar />
+      {/* Always mounted so its activeTab useState survives close/reopen. */}
+      <SignatureModal />
     </>
   );
 }

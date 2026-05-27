@@ -1,8 +1,15 @@
 "use client";
 
 import { Plus, Download } from "lucide-react";
+import { useAppState } from "@/store/useAppState";
 
 export function EditorToolbar() {
+  const { dispatch } = useAppState();
+
+  const openSignatureModal = () => {
+    dispatch({ type: "SIGNATURE_MODAL_OPEN" });
+  };
+
   return (
     <header
       className="sticky top-0 z-10 flex h-12 items-center px-6 border-b"
@@ -21,9 +28,8 @@ export function EditorToolbar() {
       <div className="flex flex-1 justify-center">
         <button
           type="button"
-          disabled
-          aria-disabled="true"
-          className="inline-flex items-center gap-2 rounded px-3 py-1.5 text-sm font-medium opacity-50 cursor-not-allowed"
+          onClick={openSignatureModal}
+          className="inline-flex items-center gap-2 rounded px-3 py-1.5 text-sm font-medium cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           style={{
             backgroundColor: "var(--color-accent)",
             color: "var(--color-surface)",
