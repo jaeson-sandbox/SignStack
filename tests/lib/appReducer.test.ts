@@ -168,6 +168,22 @@ describe("appReducer — PAGE_INTRINSIC_SET", () => {
     expect(next.document.pageIntrinsicPt.get(0)).toEqual({ width: 595, height: 842 });
     expect(next.document.pageIntrinsicPt).not.toBe(prevMap);
   });
+
+  it("does not overwrite entries for other pages", () => {
+    const seeded: AppState = {
+      ...initialState,
+      document: {
+        ...initialState.document,
+        pageIntrinsicPt: new Map([[0, { width: 612, height: 792 }]]),
+      },
+    };
+    const next = appReducer(seeded, {
+      type: "PAGE_INTRINSIC_SET",
+      payload: { pageIndex: 1, widthPt: 595, heightPt: 842 },
+    });
+    expect(next.document.pageIntrinsicPt.get(0)).toEqual({ width: 612, height: 792 });
+    expect(next.document.pageIntrinsicPt.get(1)).toEqual({ width: 595, height: 842 });
+  });
 });
 
 describe("appReducer — SIGNATURE_CREATED / modal", () => {

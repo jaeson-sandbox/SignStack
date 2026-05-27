@@ -10,6 +10,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Document } from "react-pdf";
 import { useAppState } from "@/store/useAppState";
 import { PDF_DOCUMENT_OPTIONS } from "@/lib/pdf/pdfOptions";
+import {
+  extractPageDimensions,
+  type PageMeasurementInput,
+} from "@/lib/pdf/pageDimensions";
 import { PDFPageRenderer } from "./PDFPageRenderer";
 
 // Structural-only — avoids importing PDFDocumentProxy from top-level pdfjs-dist
@@ -124,15 +128,38 @@ export function PDFScrollArea() {
   );
 
   const handlePageRendered = useCallback(
-    (pageIndex: number, heightPx: number) => {
+    (pageIndex: number, page: PageMeasurementInput) => {
+      const dims = extractPageDimensions(page);
+      // Dispatch both dimension flavors — these feed Story 4.1's coordinate
+      // mapper. Reducer uses setMapEntry, so re-dispatching with identical
+      // values is idempotent.
+      dispatch({
+        type: "PAGE_DIMENSIONS_SET",
+        payload: {
+          pageIndex,
+          widthPx: dims.widthPx,
+          heightPx: dims.heightPx,
+        },
+      });
+      dispatch({
+        type: "PAGE_INTRINSIC_SET",
+        payload: {
+          pageIndex,
+          widthPt: dims.widthPt,
+          heightPt: dims.heightPt,
+        },
+      });
+      // Local placeholder-height cache so swapping a rendered page back to
+      // a placeholder (when it scrolls out of the active window) preserves
+      // scroll position without re-measuring from the DOM.
       setPageHeights((prev) => {
-        if (prev.get(pageIndex) === heightPx) return prev;
+        if (prev.get(pageIndex) === dims.heightPx) return prev;
         const next = new Map(prev);
-        next.set(pageIndex, heightPx);
+        next.set(pageIndex, dims.heightPx);
         return next;
       });
     },
-    [],
+    [dispatch],
   );
 
   // The page with the largest non-zero intersection ratio. null if nothing
@@ -213,7 +240,7 @@ interface PageSlotProps {
   active: boolean;
   measuredHeightPx: number | null;
   registerEl: (pageIndex: number, el: HTMLElement | null) => void;
-  onPageRendered: (pageIndex: number, heightPx: number) => void;
+  onPageRendered: (pageIndex: number, page: PageMeasurementInput) => void;
 }
 
 function PageSlot({
@@ -234,7 +261,7 @@ function PageSlot({
   );
 
   const handleRendered = useCallback(
-    (heightPx: number) => onPageRendered(pageIndex, heightPx),
+    (page: PageMeasurementInput) => onPageRendered(pageIndex, page),
     [onPageRendered, pageIndex],
   );
 
