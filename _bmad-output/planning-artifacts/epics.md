@@ -2075,6 +2075,67 @@ So that the document reads correctly without leaving the browser.
 
 ---
 
+## Optional Cloud Export Integrations (post-MVP 1)
+
+**Status:** Future optional integrations. Not part of the MVP 1 core privacy model. **Files never leave the device by default** — cloud paths only activate when the user explicitly chooses a cloud export action.
+
+**Premise:** SignStack is local-first and browser-first by default. Cloud integrations are **optional convenience features**, not the default path and not the marketing pitch. The privacy promise evolves only as far as: *"Documents stay on your device unless you choose to export to an external service."* Local download remains the primary export path; every cloud integration is an opt-in alternative gated behind explicit user action.
+
+### Future Story: Export Signed PDF to Google Drive
+
+As a user who works across devices,
+I want to save my completed / signed PDF directly to Google Drive,
+So that I can access it from my phone or another computer without manually moving files — while keeping SignStack local-first by default.
+
+**Product Value:** Removes the "now download → switch device → re-upload" friction for users who already live in Google Drive. Adds a convenience path without weakening the local-first default.
+
+**Scope:**
+- After SignStack generates the exported signed PDF (Story 6.1's existing flow), the editor offers a **"Save to Google Drive"** action alongside the existing local download.
+- Upload only occurs after **explicit user action** — a button click on the post-export surface, never automatic, never on a timer, never as a side effect of another action.
+- User sees a clear **confirmation step** before upload begins (file name, destination, "this will leave your device" reminder).
+- User can choose or confirm the destination **filename** (default: `{original-name}-signed.pdf` to match Story 6.1's local filename).
+- Where practical, user can choose a Drive **folder** (default: root or a SignStack-suggested folder).
+- The uploaded file is the **final exported PDF**, not the original source PDF, unless the user explicitly requests otherwise.
+- **Local download remains the primary / default export path** — the cloud button is an alternative, not a replacement. If the user just wants the file, the existing one-click download still works exactly as it does in MVP 1.
+
+**Out of scope (initial):**
+- Auto-sync (any time the document changes, push to Drive).
+- Background uploads (anything that happens without a visible user action).
+- A cloud-based document library (SignStack listing or browsing the user's Drive contents).
+- Storing PDFs on SignStack-controlled servers.
+- Uploading original / unsigned documents by default.
+- Sharing-permissions management (who can view, comment, edit on the Drive file).
+- Multi-user / collaboration workflows.
+- Google Docs conversion (uploading as a `.gdoc` instead of `.pdf`).
+- Editing files directly inside Google Drive (no embed, no Drive-side mutation).
+- Enterprise admin controls (domain-wide policies, audit logs, etc.).
+
+**Acceptance criteria (for the future story):**
+- Given a generated signed PDF, when the user clicks **"Save to Google Drive,"** then the Google authorization flow opens.
+- Given Google authorization succeeds, when the user confirms filename / folder where practical, then the final PDF uploads to the user's Drive.
+- Given upload completes, when the response is received, then the user sees clear success feedback (and ideally a deep link to the file in Drive).
+- Given upload fails (network error, revoked auth, quota exceeded, etc.), when the failure is detected, then the user sees an actionable error message **and the local download path remains available and unaffected.**
+- Given the user has not clicked the cloud-export button, then **no upload happens** — no preflight, no telemetry, no metadata leakage. The cloud code path is silent until invoked.
+
+**Architectural notes:**
+- Requires **Google OAuth 2.0 + Drive API** integration. Do **not** add the Google SDK, OAuth client ID, environment variables, or any related config during MVP 1.
+- Treat the Drive integration as an **optional, lazy-loaded module** (e.g. `src/lib/cloud/googleDrive/`) — separate from the MVP signing / export core. Users who never click the cloud button shouldn't pay the bundle, runtime, or audit cost.
+- Keep **export generation local** in every path. The shape stays: `pdfExporter.ts` produces a `Uint8Array` / `Blob`; the cloud module accepts that blob and uploads it. The cloud module never reaches into pdf-lib or pdfjs directly.
+- UI copy must be explicit that cloud export is **optional and user-initiated**. The cloud button should not be the visually-primary action; the local download stays primary.
+- The privacy promise updates to: **"Documents stay on your device unless you choose to export to an external service."** Update the footer disclaimer, the README, and the Trust / Verification Panel (Competitive Differentiation #6) consistently when this story ships.
+- **Do not add Google dependencies during MVP 1.** No `googleapis`, no `gapi`, no OAuth client ID, no env vars, no Drive SDK shim.
+- **Do not add environment variables, OAuth config, API routes, or Drive SDK dependencies** until this story is formally opened with its own architecture pass.
+- **Before implementation, evaluate the transport model:**
+  - Option A — **browser-only direct upload** via Google Identity Services + Drive API (OAuth 2.0 token in the browser, multipart upload from the SPA). Stays consistent with the no-backend architecture. Preferred if feasible.
+  - Option B — **minimal backend callback** to handle the OAuth code-exchange and proxy the upload. Adds a server. **Revisit the architecture and privacy model first** — a backend changes the "no API routes" guarantee (AD-1, AD-10) and needs an explicit decision, not an incidental one.
+  - Choose A unless a concrete blocker is identified. If B is needed, write it down in the story's architectural notes and revisit `docs/baseline-verification.md` + architecture.md before any code lands.
+
+**Depends on:** MVP 1 shipped (Story 6.1's local export pipeline exists and is stable). Optional but ideally lands after the Trust / Verification Panel (Competitive Differentiation #6) so the export-time copy is consistent across local and cloud paths.
+
+**Roadmap note:** Google Drive export is a **future convenience integration.** It is **not** part of MVP 1 and must not compromise the local-first default workflow. Future cloud destinations (Dropbox, OneDrive, iCloud Drive, S3) would each be their own story under this same "Optional Cloud Export Integrations" header, reusing the same `Blob`-in / external-upload-out pattern.
+
+---
+
 ## Phase 3 — Combine PDFs (post-Phase 2)
 
 **Status:** Not started. Requires its own PRD iteration and architecture pass.
