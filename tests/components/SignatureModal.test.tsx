@@ -1,11 +1,66 @@
-import { describe, expect, it } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { SignatureModal } from "@/components/signature/SignatureModal";
 import { AppProvider } from "@/store/AppProvider";
 import { useAppState } from "@/store/useAppState";
 
-// Test helper: button rendered into the test tree that dispatches OPEN so the
-// modal lights up through the real reducer (no dispatch mock needed).
+// jsdom's <canvas> 2D context can't run signature_pad reliably (no real path
+// math), so the modal tests stub react-signature-canvas with a tiny class that
+// exposes the same surface (isEmpty / clear / toDataURL + onEnd prop) and lets
+// the test simulate a stroke. The pure helper test
+// (tests/lib/captureDrawnSignature.test.ts) does not use this mock.
+const { mountedInstances } = vi.hoisted(() => ({
+  mountedInstances: [] as FakeSignatureCanvas[],
+}));
+
+interface FakeSignatureCanvas {
+  _isEmpty: boolean;
+  isEmpty(): boolean;
+  clear(): void;
+  toDataURL(type?: string): string;
+  _simulateStroke(): void;
+  props: { onEnd?: () => void };
+}
+
+vi.mock("react-signature-canvas", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
+
+  class FakeSignatureCanvasImpl extends React.Component<{ onEnd?: () => void }> {
+    _isEmpty = true;
+
+    constructor(props: { onEnd?: () => void }) {
+      super(props);
+      mountedInstances.push(this as unknown as FakeSignatureCanvas);
+    }
+
+    isEmpty() {
+      return this._isEmpty;
+    }
+
+    clear() {
+      this._isEmpty = true;
+    }
+
+    toDataURL() {
+      return "data:image/png;base64,FAKE_DRAWN_SIGNATURE";
+    }
+
+    _simulateStroke() {
+      this._isEmpty = false;
+      this.props.onEnd?.();
+    }
+
+    render() {
+      return null;
+    }
+  }
+
+  return {
+    default: FakeSignatureCanvasImpl,
+    SignatureCanvas: FakeSignatureCanvasImpl,
+  };
+});
+
 function OpenButton() {
   const { dispatch } = useAppState();
   return (
@@ -18,11 +73,22 @@ function OpenButton() {
   );
 }
 
+function SignatureProbe() {
+  const { state } = useAppState();
+  return (
+    <div data-testid="signature-probe">
+      {state.signature.dataUrl ?? "no-signature"}|{state.signature.type ?? "no-type"}|
+      {state.ui.isSignatureModalOpen ? "open" : "closed"}
+    </div>
+  );
+}
+
 function renderModal() {
   return render(
     <AppProvider>
       <OpenButton />
       <SignatureModal />
+      <SignatureProbe />
     </AppProvider>,
   );
 }
@@ -31,7 +97,23 @@ function openModal() {
   fireEvent.click(screen.getByRole("button", { name: "open-modal-trigger" }));
 }
 
-describe("<SignatureModal />", () => {
+function getLatestCanvas(): FakeSignatureCanvas {
+  const last = mountedInstances[mountedInstances.length - 1];
+  if (!last) throw new Error("no SignatureCanvas mounted");
+  return last;
+}
+
+function simulateStroke() {
+  act(() => {
+    getLatestCanvas()._simulateStroke();
+  });
+}
+
+beforeEach(() => {
+  mountedInstances.length = 0;
+});
+
+describe("<SignatureModal /> — shell", () => {
   it("renders nothing when isSignatureModalOpen is false", () => {
     renderModal();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -77,12 +159,13 @@ describe("<SignatureModal />", () => {
     openModal();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
 
-    // The Escape handler is attached to window, so dispatch there.
     fireEvent.keyDown(window, { key: "Escape" });
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
+});
 
+describe("<SignatureModal /> — tabs", () => {
   it("renders both Draw and Type tabs with Draw active by default", () => {
     renderModal();
     openModal();
@@ -91,10 +174,9 @@ describe("<SignatureModal />", () => {
     const typeTab = screen.getByRole("tab", { name: "Type" });
     expect(drawTab).toHaveAttribute("aria-selected", "true");
     expect(typeTab).toHaveAttribute("aria-selected", "false");
-    // Draw tabpanel is the one that's currently visible.
-    expect(
-      screen.getByText(/drawing canvas coming in story 4\.3/i),
-    ).toBeInTheDocument();
+    // Draw tabpanel marker: the Clear button only exists in the Draw tab.
+    expect(screen.getByRole("button", { name: /^clear$/i })).toBeInTheDocument();
+    // Type tab placeholder text is absent.
     expect(
       screen.queryByText(/typed signature input coming in story 4\.4/i),
     ).not.toBeInTheDocument();
@@ -114,39 +196,29 @@ describe("<SignatureModal />", () => {
       "aria-selected",
       "false",
     );
+    // Type tabpanel content visible.
     expect(
       screen.getByText(/typed signature input coming in story 4\.4/i),
     ).toBeInTheDocument();
+    // Draw tab's Clear button is no longer rendered.
     expect(
-      screen.queryByText(/drawing canvas coming in story 4\.3/i),
+      screen.queryByRole("button", { name: /^clear$/i }),
     ).not.toBeInTheDocument();
-  });
-
-  it("Use Signature button is disabled (Stories 4.3 / 4.4 enable it)", () => {
-    renderModal();
-    openModal();
-
-    const useBtn = screen.getByRole("button", { name: /use signature/i });
-    expect(useBtn).toBeDisabled();
-    expect(useBtn).toHaveAttribute("aria-disabled", "true");
   });
 
   it("active tab persists across close/reopen (component stays mounted)", () => {
     renderModal();
     openModal();
 
-    // Switch to Type.
     fireEvent.click(screen.getByRole("tab", { name: "Type" }));
     expect(screen.getByRole("tab", { name: "Type" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
 
-    // Close.
     fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
-    // Reopen — Type should still be the active tab.
     openModal();
     expect(screen.getByRole("tab", { name: "Type" })).toHaveAttribute(
       "aria-selected",
@@ -155,5 +227,61 @@ describe("<SignatureModal />", () => {
     expect(
       screen.getByText(/typed signature input coming in story 4\.4/i),
     ).toBeInTheDocument();
+  });
+});
+
+describe("<SignatureModal /> — drawn signature flow", () => {
+  it("Use Signature is disabled on first open (canvas empty)", () => {
+    renderModal();
+    openModal();
+
+    expect(screen.getByRole("button", { name: /use signature/i })).toBeDisabled();
+  });
+
+  it("Use Signature enables after a stroke ends with non-empty canvas", () => {
+    renderModal();
+    openModal();
+    expect(screen.getByRole("button", { name: /use signature/i })).toBeDisabled();
+
+    simulateStroke();
+
+    expect(screen.getByRole("button", { name: /use signature/i })).toBeEnabled();
+  });
+
+  it("Clear re-disables Use Signature and wipes the canvas", () => {
+    renderModal();
+    openModal();
+    simulateStroke();
+    expect(screen.getByRole("button", { name: /use signature/i })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /^clear$/i }));
+
+    expect(screen.getByRole("button", { name: /use signature/i })).toBeDisabled();
+    expect(getLatestCanvas().isEmpty()).toBe(true);
+  });
+
+  it("clicking Use Signature dispatches SIGNATURE_CREATED with type 'drawn' and closes the modal", () => {
+    renderModal();
+    openModal();
+    simulateStroke();
+
+    fireEvent.click(screen.getByRole("button", { name: /use signature/i }));
+
+    const probe = screen.getByTestId("signature-probe");
+    expect(probe).toHaveTextContent("data:image/png;base64,FAKE_DRAWN_SIGNATURE");
+    expect(probe).toHaveTextContent("|drawn|");
+    expect(probe).toHaveTextContent("|closed");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("on reopen, the canvas resets and Use Signature is disabled again", () => {
+    renderModal();
+    openModal();
+    simulateStroke();
+    fireEvent.click(screen.getByRole("button", { name: /use signature/i }));
+
+    // Reopen — new SignatureCanvas instance mounted; Use Signature disabled.
+    openModal();
+    expect(screen.getByRole("button", { name: /use signature/i })).toBeDisabled();
   });
 });
