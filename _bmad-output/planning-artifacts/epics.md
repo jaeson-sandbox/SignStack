@@ -1729,8 +1729,421 @@ Then Chrome 110+, Firefox 110+, and Safari 16+ desktop are listed.
 
 ## Roadmap Context (Out of Scope for MVP 1)
 
-The following are referenced in Phase 2 and Phase 3 of the Product Brief. They must not be implemented in any MVP 1 story:
+The following are referenced in Phase 2 and Phase 3 of the Product Brief and are documented here so the team can reason about architectural fit while building MVP 1. **None of these are MVP 1 work — MVP 1 remains visual PDF signing only.** No story in this section may be implemented until MVP 1 ships and the relevant phase is formally opened (own PRD iteration, own architecture pass).
 
-**Phase 2 — Fill-out Overlays:** Text box, date field, and checkmark overlays placed on PDF pages.
-**Phase 3 — Combine PDFs:** Multi-document upload, page reordering, PDF merge and export.
-**Post-MVP:** User accounts, signature library, save-draft, mobile-optimized layout, thumbnail navigation, payments, cloud storage.
+### Guardrail: native PDF text is not edited
+
+True editing of existing PDF text (parsing the content stream, mutating glyphs, reflowing layout, replacing fonts) is **explicitly out of roadmap scope** at every phase below. If a user needs to visually alter existing text, the answer is:
+
+- Phase 2's text-box overlay (place new text over the original), or
+- A future whiteout/replacement-overlay workflow (a filled rectangle plus a text overlay on top — still purely additive, never touches the source content stream).
+
+This guardrail exists because native PDF text mutation needs a font-substitution + reflow engine (or risks producing visually broken files), and that complexity is not aligned with SignStack's "local, browser-first, simple" identity. Reconsider only if the overlay workflow proves insufficient in practice.
+
+---
+
+## Phase 2 — Fill-Out Overlay Tools (post-MVP 1)
+
+**Status:** Not started. Do not implement until MVP 1 ships and Phase 2 is formally opened.
+
+**Premise:** The MVP 1 overlay model (drag, resize, delete, embed via `pdf-lib`) generalizes from "signature image" to "any addressable content." Phase 2 reuses that model for text, date, and checkmark overlays — no new infrastructure, only new overlay types and editors.
+
+**Architectural prerequisites already in place from MVP 1:**
+- `Overlay` interface (`src/types/index.ts`) — will grow a discriminator union: `type: "signature" | "text" | "date" | "checkmark"` plus per-type payload.
+- Coordinate mapper (Story 4.1) — Phase 2 reuses the same screen-px → PDF-pt conversion.
+- React-rnd-based overlay component (Story 5.4) — generalize so children render per overlay type.
+- pdf-lib export pipeline (Story 6.1) — extend to call `page.drawText` or `page.drawImage` based on overlay type.
+
+### Future Story P2.1: Add Text Box Overlay
+
+As a user filling out a form,
+I want to drop a text box on the current PDF page and type into it,
+So that I can fill blank fields without re-creating the document.
+
+**Product Value:** Closes the most common form-fill use case (rental applications, intake forms, invoices). Removes the need to print → handwrite → scan.
+
+**Scope:**
+- User adds a text box via a Phase-2 toolbar entry (e.g., `+ Text`); it lands on `state.currentVisiblePageIndex` with a default size at the bottom-right quadrant (mirrors Story 5.1's signature placement).
+- Text box uses the **same Overlay model** as signatures — `id`, `pageIndex`, `x`, `y`, `width`, `height` — plus a discriminator and `text: string`.
+- Selection, move, resize, delete: identical to signature overlay (Story 5.4 / Story 5.5 keyboard nudge / Story 5.3 delete).
+- Inline editing: double-click (or single-click when already selected) opens a contenteditable / `<textarea>` inside the overlay.
+- Text content stored in app state (`overlays[].text`).
+- Export via `pdf-lib`'s `page.drawText(text, { x, y, font, size, color })` — font is a single bundled `StandardFonts.Helvetica` (or user-selectable later).
+
+**Out of scope (this story):**
+- Editing native PDF text or AcroForm fields.
+- Multi-font / rich-text formatting.
+- OCR or AI extraction.
+- Server-side processing.
+- Font selection (defer to a follow-up story).
+
+**Architectural notes:**
+- Adds a new action: `OVERLAY_TEXT_EDITED { id, text }`. No new reducer cases for move/resize/delete — they're shared.
+- Coordinate conversion (screen px → PDF pt) reuses `coordinateMapper.ts` unchanged.
+- Font baseline matters: pdf-lib's `drawText` y is the baseline, not the top — the existing y-flip in `coordinateMapper` will need a baseline adjustment specific to text. Document this in the Phase 2 architecture pass.
+
+**Depends on:** MVP 1 shipped (Epics 4, 5, 6 complete).
+
+---
+
+### Future Story P2.2: Add Date Overlay
+
+As a user filling out a form,
+I want to drop a date stamp on the current PDF page,
+So that I can fill the "Date" line without manually typing today's date for the Nth time.
+
+**Product Value:** Tiny ergonomic win that shows up on almost every signable form.
+
+**Scope:**
+- User adds a date overlay via a Phase-2 toolbar entry (e.g., `+ Date`).
+- Same Overlay model + discriminator (`type: "date"`) + payload `{ isoDate: string; format: "MM/DD/YYYY" | "YYYY-MM-DD" | "DD MMM YYYY" }`.
+- Default value: today's local date.
+- Inline editor: small popover with a date input + format selector.
+- Move / resize / delete: same as signature overlay.
+- Export via `pdf-lib`'s `page.drawText` (rendered as formatted string).
+
+**Out of scope:** time-of-day, timezone selection, locale-aware month names beyond a fixed list, signed/tamper-evident timestamps.
+
+**Architectural notes:**
+- Date formatting is a pure utility (`src/lib/format/date.ts`). No external date library required — Intl APIs cover MVP needs.
+- Reuses the same `OVERLAY_TEXT_EDITED`-style action (or introduces `OVERLAY_DATE_EDITED { id, isoDate, format }`); decide during the Phase 2 architecture pass.
+
+**Depends on:** P2.1 (establishes the overlay-type discriminator pattern).
+
+---
+
+### Future Story P2.3: Add Checkmark Overlay
+
+As a user filling out a checkbox,
+I want to drop a checkmark on the current PDF page,
+So that I can mark "yes" on a printed form without printing it.
+
+**Product Value:** Required to fully cover the form-fill use case (no form is complete without checkboxes).
+
+**Scope:**
+- User adds a checkmark via a Phase-2 toolbar entry (e.g., `+ Check`).
+- Same Overlay model + discriminator (`type: "checkmark"`) — no editable payload, the checkmark is a fixed glyph.
+- Default size: small square (~24×24 px), positioned at the page's default placement quadrant.
+- Move / delete: same as signature overlay. Resize allowed but uniformly scaled.
+- Render: a centered checkmark glyph (Unicode `✓` or an SVG path embedded in a `<canvas>` → PNG).
+- Export via `pdf-lib`'s `page.drawText("✓", ...)` **or** `page.drawSvgPath(...)` — decide during the Phase 2 architecture pass based on font availability.
+
+**Out of scope:** alternate marks (X, dot, filled square — defer until requested), color picker.
+
+**Architectural notes:**
+- If `drawText("✓", ...)` is used, ensure the standard font set (`standardFontDataUrl` from Story 3.2) covers the codepoint. The Foxit / Liberation fonts mirrored under `public/standard_fonts/` cover U+2713; verify at implementation time.
+
+**Depends on:** P2.1.
+
+---
+
+### Future Story P2.4: Export Fill-Out Overlays
+
+As a user finishing a filled-out form,
+I want the downloaded PDF to contain all my text, date, and checkmark overlays,
+So that the recipient sees the completed document, not the blank original.
+
+**Product Value:** Closes the Phase 2 loop — without export, the overlays are local-only and worthless.
+
+**Scope:**
+- Extend `pdfExporter.ts` to switch on `overlay.type` and call the appropriate `pdf-lib` primitive (`drawImage` for signatures, `drawText` for text/date/checkmark).
+- Reuse the same `coordinateMapper.ts` (screen px → PDF pt) for all overlay types. Text baseline adjustment per P2.1.
+- Output filename and download flow unchanged from MVP 1's Story 6.1.
+- Add tests for each overlay-type export branch where practical.
+
+**Out of scope:** any visual change to the editor (already covered by P2.1–P2.3).
+
+**Architectural notes:**
+- Export is the only place where Phase 2 logic differs from MVP 1's per-overlay-type loop. Keep the switch isolated to `pdfExporter.ts` — overlay components stay type-agnostic where possible.
+
+**Depends on:** P2.1, P2.2, P2.3.
+
+---
+
+## Future Story: Copy Existing PDF Text (post-MVP 1)
+
+**Status:** Not started. Independent of Phase 2 (can land before, after, or in parallel once MVP 1 ships).
+
+As a user reviewing a PDF in SignStack,
+I want to select visible PDF text with the mouse and copy it (Ctrl+C),
+So that I can paste it elsewhere the same way I can in Chrome's built-in PDF viewer.
+
+**Product Value:** Removes a major friction surfaced by anyone who opens a PDF expecting browser-default behavior. Today SignStack silently fails this expectation — selectable text isn't selectable because the text layer is disabled.
+
+**Scope:**
+- Re-enable react-pdf's **text layer** (currently `renderTextLayer={false}` in `PDFPageRenderer.tsx`) for pages where the PDF actually contains selectable text.
+- Native browser selection + Ctrl+C must work end-to-end — no custom selection model, no custom clipboard handler unless react-pdf's text layer proves insufficient.
+- If a page has no selectable text (scanned / image-only PDF), do **not** claim copying is available — the text layer simply renders nothing and selection silently does nothing, matching Chrome's behavior.
+- Must not interfere with signature overlay selection / dragging (Story 5.x).
+- Must not interfere with future Phase 2 text-box overlay selection / dragging.
+
+**Out of scope:**
+- True editing of existing PDF text. (See "Guardrail: native PDF text is not edited" above.)
+- OCR for scanned PDFs.
+- AI text extraction or summarization.
+- Server-side text extraction.
+- Native PDF text mutation.
+- Selection across pages.
+
+**Architectural notes:**
+- **Prefer react-pdf's text layer** before introducing any custom text extraction. It uses pdfjs's structured text data and renders an invisible-but-selectable HTML overlay aligned with the canvas. This is the same mechanism Chrome's PDF viewer uses.
+- Re-enabling it requires importing `react-pdf/dist/Page/TextLayer.css` (deferred in Story 3.2) and re-rendering pages — no new dependencies.
+- **Interaction order matters.** Browser text selection and react-rnd drag are both `mousedown` consumers. Likely solution: a small editor-mode model — `"select" | "sign" | "text" | "copy"` — where:
+  - In `copy` mode, the text layer is enabled and overlay components ignore `mousedown` events (pointer-events: none on overlay handles).
+  - In `sign` / `text` / `select` modes, the text layer is disabled or `pointer-events: none`, and overlays own the gestures.
+  - Default mode is `select` (today's behavior).
+- Editor-mode state lives on `AppState` (e.g. `state.ui.editorMode`). Single source of truth.
+- **Do not introduce a separate PDF parsing pipeline** (e.g. directly calling `pdfjs.getDocument().getPage().getTextContent()`) unless react-pdf's text layer proves insufficient. The text layer already does this internally; reimplementing it would duplicate work and risk diverging from pdfjs's positioning math.
+- Local-first / browser-only: no network egress, no clipboard upload, no analytics on copied content. Standard browser clipboard APIs only.
+
+**Depends on:** MVP 1 shipped. Loose dependency on Phase 2 — if Phase 2's text-box overlay lands first, the editor-mode model should be designed jointly so `text` (place a text box) and `copy` (select existing text) coexist cleanly.
+
+---
+
+## Competitive Differentiation Ideas (post-MVP 1)
+
+**Status:** Direction-setting notes, not stories yet. None of these are MVP 1 work.
+
+**Premise:** SignStack should not try to beat DocuSign at enterprise agreement workflows (recipient verification, envelope routing, integrations, contract lifecycle management). The stronger direction is a **lightweight, local-first, privacy-first PDF utility toolkit** that does a small number of things very well, on the user's device, without an account. The ideas below are roadmap-shaping bets that reinforce that identity; promote them to concrete stories when MVP 1 ships and the priority of each is clear.
+
+### 1. Local-First Privacy Mode
+
+- Make the "never leaves the browser" promise visually unmistakable in the UI (the current footer disclaimer is a baseline, not the ceiling).
+- Add a prominent **"No upload"** trust indicator (e.g., a badge on the toolbar with a tooltip explaining what does and doesn't leave the device).
+- Add an explicit **"Clear document from memory"** action that drops the in-memory `ArrayBuffer`, overlays, and signature, returning the user to the upload surface.
+- Add a privacy technical note to `README.md` explaining the architecture (no API routes, no analytics on document content, etc.).
+
+### 2. Offline / PWA Mode
+
+- Ship SignStack as a Progressive Web App so it works fully after the first load — sign, fill, and export without a network connection.
+- Cache the app bundle, the pdfjs worker, and `public/standard_fonts/` via a service worker.
+- No cloud dependency at any point. Reinforces the privacy promise.
+
+### 3. Smart Form Assist (no accounts, no AI)
+
+- Detect likely blank lines / boxes in the rendered PDF visually or structurally (e.g., long horizontal underscores, square outlines, repeated whitespace gaps).
+- Suggest places where the user might want a text box, date, signature, or checkmark — one-click placement.
+- **Local-first.** No AI / server processing in the initial cut; heuristic-based detection only. Promote to an ML-assisted version only if heuristics prove insufficient and a local model fits the bundle / latency budget.
+
+### 4. Reusable Local Templates
+
+- Let the user save the overlay layout from the current document as a named "template" — same overlays at the same positions on the same page indexes.
+- Apply a saved template to a fresh upload that shares the same form layout (e.g., the same apartment application month after month).
+- Store templates **locally** in browser storage (IndexedDB) for the early version; explicit "Export template" / "Import template" JSON for cross-device transfer. Never cloud-synced.
+
+### 5. PDF Utility Toolkit
+
+A consolidated direction that groups several utilities under one local-first roof:
+
+- Combine PDFs (Phase 3 stub below).
+- Split PDFs.
+- Reorder pages.
+- **Rotate pages** (see the dedicated future story below).
+- Extract pages.
+- **Copy existing selectable PDF text** (see the dedicated future story above).
+- **Text / date / checkmark overlays** (Phase 2 stories above).
+
+These all reuse the existing pdfjs / pdf-lib pipeline and the local-first architecture. Promotable to a unified "Utilities" surface in the editor when more than one is built.
+
+### 6. Trust / Verification Panel
+
+- Surface a small panel summarizing exactly what SignStack changed in the exported PDF — e.g., **"Added 1 visual signature on page 2; added 1 text box on page 1."**
+- Make it explicit that this is **not** a cryptographic / certificate-based digital signature — same disclaimer language as the footer, surfaced at the moment of export so the user is reminded right before sharing.
+- Optional follow-up: a "verify what this PDF claims" mode for received documents — read pdf-lib's metadata and surface any visual-signature overlays detected.
+
+---
+
+## Epic: OCR and Searchable PDFs (post-MVP 1)
+
+**Status:** Not started. Future epic — evaluate **after** MVP 1 ships, Phase 2 (fill-out overlays), Phase 3 (combine PDFs), and the Copy Existing PDF Text story are all stable. Do not add OCR dependencies during MVP 1.
+
+**Product intent:** SignStack should eventually help users **search text inside PDFs** — including scanned / image-only PDFs — while preserving the local-first / browser-first privacy promise. This fits the lightweight PDF utility toolkit direction (Competitive Differentiation #5) and addresses a real gap: most signing tools focus on sending documents for signatures, but users also need lightweight private utilities like "find that clause" in a scanned contract.
+
+**Positioning:** Future differentiator. Reinforces the "local-first PDF toolkit" identity without copying DocuSign's enterprise workflow surface.
+
+### Future Story OCR.1: OCR Scanned PDFs Locally
+
+As a user opening a scanned PDF,
+I want SignStack to extract the page text for me,
+So that I can copy or search content from documents I'd otherwise have to retype.
+
+**Scope:**
+- User can run OCR on scanned / image-only PDF pages from an explicit "Extract text (OCR)" action — not automatic on upload.
+- OCR operates on rendered page images (canvas → image data).
+- OCR runs **locally in the browser** wherever practical.
+- Extracted text is associated with its page number (and, where the OCR engine provides them, per-word bounding boxes for future highlighting).
+- User can copy the OCR-derived text.
+- User can search the OCR-derived text (see OCR.2).
+
+**Out of scope (initial):**
+- Server-side OCR.
+- Cloud upload of any kind.
+- AI summarization.
+- **Embeddings, semantic search, vector databases, RAG.** Explicitly deferred — see roadmap note below.
+- Handwritten-text recognition guarantees (best-effort only).
+- Perfect layout reconstruction (multi-column, tables, headers/footers).
+
+### Future Story OCR.2: Search Extracted PDF Text
+
+As a user reviewing a PDF,
+I want to search across the document's text,
+So that I can jump to the page that mentions what I'm looking for.
+
+**Scope:**
+- User can search across text extracted from the current PDF.
+- Search covers **both**:
+  - native selectable PDF text (via the Copy Existing PDF Text story's text-layer infrastructure), and
+  - OCR-derived text for scanned / image-only pages (OCR.1).
+- Results show page number + matched snippet (a few words of context on each side).
+- Clicking a result jumps to that page.
+- If exact text coordinates are available (e.g., from pdfjs's text layer or per-word OCR bboxes), highlight the match in place.
+- If coordinates are not available, jump to the page and show the snippet in a side panel.
+
+**Out of scope (initial):**
+- Semantic search.
+- Natural-language question answering.
+- AI chat over the document.
+- Cloud indexing.
+- Account-based document libraries (cross-document search across a user's history).
+
+### Future Story OCR.3: Local OCR / Text Data Management
+
+As a user concerned about privacy,
+I want to know what extracted text is stored locally and be able to clear it,
+So that I stay in control of the by-product data SignStack generates.
+
+**Scope:**
+- UI shows whether OCR / search data exists for the current document.
+- User can clear OCR / search data for the current document.
+- User can clear **all** locally stored OCR / search data (across documents, if persistence is enabled).
+- UI clearly explains that extracted text is stored locally if persistence is enabled (and that it's session-only if not).
+- No analytics. No uploads of document text. Same privacy invariants as the rest of the app.
+
+### Architecture notes (OCR epic)
+
+- **Prefer browser-local OCR** — the initial bet is on something like Tesseract-WASM running in a Web Worker. Server-side OCR would break the privacy invariant.
+- Treat the OCR engine as an **optional lazy-loaded module**, not part of the initial app bundle. Users who never run OCR shouldn't pay the bundle cost.
+- Keep OCR / search code in its own folder (e.g. `src/lib/ocr/`, `src/lib/search/`) — **separate from MVP signing / export code**. No cross-imports beyond the public interfaces.
+- **Do not add OCR dependencies during MVP 1.** Any future dependency must be justified by an explicit tradeoff analysis: bundle size, browser support, OCR accuracy, privacy implications, runtime perf.
+- Use **Web Workers** for OCR runs to avoid blocking the UI thread.
+- Index by `{ documentHash, pageIndex, chunkIndex }`. Start with **exact keyword search only** (string `includes` or simple FTS, no analyzers).
+- **Do not add embeddings / semantic search / vector DBs** until exact OCR search is shipped, used, and its limitations are concretely understood. Semantic search adds large model dependencies, complex caching, and a privacy-claim audit; not worth it until the simple path proves valuable.
+- Keep the trust message simple: **documents and extracted text stay on the user's device.**
+
+### Roadmap note (OCR epic)
+
+OCR and exact text search are post-MVP 1 ideas. Evaluate **after** visual signing (Epics 1–7), fill-out overlays (Phase 2), combine PDFs (Phase 3), and Copy Existing PDF Text are working. **Semantic search, embeddings, vector search, and RAG-style features are intentionally deferred and should not be planned until OCR / exact-keyword search is proven valuable.** The order matters: a working dumb feature beats a half-built smart one.
+
+---
+
+## Future Story: Rotate PDF Pages (post-MVP 1)
+
+**Status:** Future PDF utility story. Part of the PDF utility toolkit direction (Competitive Differentiation #5). Implement after MVP signing / export is complete and the coordinate mapping pipeline is stable.
+
+As a user with a scanned or wrong-way-up PDF,
+I want to rotate individual pages (or all pages) before exporting,
+So that the document reads correctly without leaving the browser.
+
+**Product Value:** Common ergonomic fix for scanned-on-a-phone documents and forms that were saved sideways. Currently the user's only recourse is another tool.
+
+**Scope:**
+- User can rotate an individual page **90° clockwise**.
+- User can rotate an individual page **90° counterclockwise** if practical.
+- User can rotate **all pages** in a document if practical (one click).
+- Rotation is **previewed live** in the editor (the rendered page reflects the rotation immediately).
+- Rotation is **preserved in the exported PDF** (the downloaded file opens in the rotated orientation in any viewer).
+- Rotation must compose correctly with the existing page-rendering, page-measurement, coordinate-mapping, and overlay-export models.
+- If overlays exist on a rotated page, **export must remain visually correct** — an overlay placed in the top-right of a page must still appear in the user-visible top-right after rotation, in both the editor and the exported PDF.
+
+**Out of scope (initial):**
+- Arbitrary-angle rotation (only 90° increments).
+- Deskewing scanned pages.
+- Auto-detecting page orientation.
+- OCR-based rotation detection.
+- Server-side PDF processing.
+
+**Architecture notes:**
+- **Prefer pdf-lib's page rotation support** during export (`page.setRotation(degrees(...))`) over re-rasterizing the page.
+- Store rotation as **page-level document state** — likely `pageRotationsByIndex: Map<number, 0 | 90 | 180 | 270>` on `DocumentState`. New reducer action `PAGE_ROTATED { pageIndex, degrees }`.
+- **Rendering must account for rotation** so the preview matches the exported file. react-pdf's `<Page>` accepts a `rotate` prop — use it.
+- **Coordinate mapping must account for rotation** before this feature ships with overlays. The `coordinateMapper.ts` from Story 4.1 needs an extension that takes the page rotation into account when converting screen-px overlay coordinates to PDF-pt; otherwise overlays on rotated pages will be placed incorrectly in the exported file.
+- Keep the feature **local-first / browser-first** like every other PDF utility.
+
+**Depends on:** MVP 1 shipped (Story 4.1's coordinate mapper, Story 6.1's export pipeline). Best implemented after the coordinate mapper is stable and well-tested with non-rotated pages.
+
+**Roadmap note:** Page rotation is part of the future PDF utility toolkit alongside combine, split, reorder, and extract pages (Competitive Differentiation #5). It is **not** part of MVP 1 visual signing.
+
+---
+
+## Optional Cloud Export Integrations (post-MVP 1)
+
+**Status:** Future optional integrations. Not part of the MVP 1 core privacy model. **Files never leave the device by default** — cloud paths only activate when the user explicitly chooses a cloud export action.
+
+**Premise:** SignStack is local-first and browser-first by default. Cloud integrations are **optional convenience features**, not the default path and not the marketing pitch. The privacy promise evolves only as far as: *"Documents stay on your device unless you choose to export to an external service."* Local download remains the primary export path; every cloud integration is an opt-in alternative gated behind explicit user action.
+
+### Future Story: Export Signed PDF to Google Drive
+
+As a user who works across devices,
+I want to save my completed / signed PDF directly to Google Drive,
+So that I can access it from my phone or another computer without manually moving files — while keeping SignStack local-first by default.
+
+**Product Value:** Removes the "now download → switch device → re-upload" friction for users who already live in Google Drive. Adds a convenience path without weakening the local-first default.
+
+**Scope:**
+- After SignStack generates the exported signed PDF (Story 6.1's existing flow), the editor offers a **"Save to Google Drive"** action alongside the existing local download.
+- Upload only occurs after **explicit user action** — a button click on the post-export surface, never automatic, never on a timer, never as a side effect of another action.
+- User sees a clear **confirmation step** before upload begins (file name, destination, "this will leave your device" reminder).
+- User can choose or confirm the destination **filename** (default: `{original-name}-signed.pdf` to match Story 6.1's local filename).
+- Where practical, user can choose a Drive **folder** (default: root or a SignStack-suggested folder).
+- The uploaded file is the **final exported PDF**, not the original source PDF, unless the user explicitly requests otherwise.
+- **Local download remains the primary / default export path** — the cloud button is an alternative, not a replacement. If the user just wants the file, the existing one-click download still works exactly as it does in MVP 1.
+
+**Out of scope (initial):**
+- Auto-sync (any time the document changes, push to Drive).
+- Background uploads (anything that happens without a visible user action).
+- A cloud-based document library (SignStack listing or browsing the user's Drive contents).
+- Storing PDFs on SignStack-controlled servers.
+- Uploading original / unsigned documents by default.
+- Sharing-permissions management (who can view, comment, edit on the Drive file).
+- Multi-user / collaboration workflows.
+- Google Docs conversion (uploading as a `.gdoc` instead of `.pdf`).
+- Editing files directly inside Google Drive (no embed, no Drive-side mutation).
+- Enterprise admin controls (domain-wide policies, audit logs, etc.).
+
+**Acceptance criteria (for the future story):**
+- Given a generated signed PDF, when the user clicks **"Save to Google Drive,"** then the Google authorization flow opens.
+- Given Google authorization succeeds, when the user confirms filename / folder where practical, then the final PDF uploads to the user's Drive.
+- Given upload completes, when the response is received, then the user sees clear success feedback (and ideally a deep link to the file in Drive).
+- Given upload fails (network error, revoked auth, quota exceeded, etc.), when the failure is detected, then the user sees an actionable error message **and the local download path remains available and unaffected.**
+- Given the user has not clicked the cloud-export button, then **no upload happens** — no preflight, no telemetry, no metadata leakage. The cloud code path is silent until invoked.
+
+**Architectural notes:**
+- Requires **Google OAuth 2.0 + Drive API** integration. Do **not** add the Google SDK, OAuth client ID, environment variables, or any related config during MVP 1.
+- Treat the Drive integration as an **optional, lazy-loaded module** (e.g. `src/lib/cloud/googleDrive/`) — separate from the MVP signing / export core. Users who never click the cloud button shouldn't pay the bundle, runtime, or audit cost.
+- Keep **export generation local** in every path. The shape stays: `pdfExporter.ts` produces a `Uint8Array` / `Blob`; the cloud module accepts that blob and uploads it. The cloud module never reaches into pdf-lib or pdfjs directly.
+- UI copy must be explicit that cloud export is **optional and user-initiated**. The cloud button should not be the visually-primary action; the local download stays primary.
+- The privacy promise updates to: **"Documents stay on your device unless you choose to export to an external service."** Update the footer disclaimer, the README, and the Trust / Verification Panel (Competitive Differentiation #6) consistently when this story ships.
+- **Do not add Google dependencies during MVP 1.** No `googleapis`, no `gapi`, no OAuth client ID, no env vars, no Drive SDK shim.
+- **Do not add environment variables, OAuth config, API routes, or Drive SDK dependencies** until this story is formally opened with its own architecture pass.
+- **Before implementation, evaluate the transport model:**
+  - Option A — **browser-only direct upload** via Google Identity Services + Drive API (OAuth 2.0 token in the browser, multipart upload from the SPA). Stays consistent with the no-backend architecture. Preferred if feasible.
+  - Option B — **minimal backend callback** to handle the OAuth code-exchange and proxy the upload. Adds a server. **Revisit the architecture and privacy model first** — a backend changes the "no API routes" guarantee (AD-1, AD-10) and needs an explicit decision, not an incidental one.
+  - Choose A unless a concrete blocker is identified. If B is needed, write it down in the story's architectural notes and revisit `docs/baseline-verification.md` + architecture.md before any code lands.
+
+**Depends on:** MVP 1 shipped (Story 6.1's local export pipeline exists and is stable). Optional but ideally lands after the Trust / Verification Panel (Competitive Differentiation #6) so the export-time copy is consistent across local and cloud paths.
+
+**Roadmap note:** Google Drive export is a **future convenience integration.** It is **not** part of MVP 1 and must not compromise the local-first default workflow. Future cloud destinations (Dropbox, OneDrive, iCloud Drive, S3) would each be their own story under this same "Optional Cloud Export Integrations" header, reusing the same `Blob`-in / external-upload-out pattern.
+
+---
+
+## Phase 3 — Combine PDFs (post-Phase 2)
+
+**Status:** Not started. Requires its own PRD iteration and architecture pass.
+
+Multi-document upload, page reordering across documents, and pdf-lib-based merge and export. Out of scope until Phase 2 ships and Phase 3 is formally opened.
+
+---
+
+## Post-MVP (no phase commitment)
+
+User accounts, signature library, save-draft, mobile-optimized layout, thumbnail navigation, payments, cloud storage. These are not on any roadmap — listed only to make it explicit that they are **not** what SignStack is becoming.
