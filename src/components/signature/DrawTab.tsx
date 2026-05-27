@@ -14,7 +14,12 @@ const CANVAS_HEIGHT = 200;
 // Guideline sits at 70% of the canvas height — gives the user a baseline
 // to "sign on" without dominating the canvas surface (UX spec § Draw Tab).
 const GUIDELINE_TOP_PERCENT = 70;
-const INK_COLOR = "var(--color-ink)";
+// Must be a literal CSS color string. The Canvas 2D API silently ignores
+// invalid `strokeStyle` values (including `var(...)` expressions) which is
+// what caused the "drawing produces no visible stroke" bug post-merge of
+// the first 4.3 attempt. Keep this in sync with --color-ink in globals.css.
+// Regression-guarded by tests/components/DrawTab.test.tsx.
+export const INK_COLOR_HEX = "#1E1B4B";
 
 interface DrawTabProps {
   /** Fired after every stroke end and after Clear. Parent uses this to
@@ -67,17 +72,18 @@ export const DrawTab = forwardRef<DrawTabHandle, DrawTabProps>(
         aria-labelledby="signature-tab-draw"
       >
         <div
-          className="relative rounded-md overflow-hidden"
+          className="relative rounded-md overflow-hidden border"
           style={{
             width: CANVAS_WIDTH,
             height: CANVAS_HEIGHT,
-            backgroundColor: "var(--color-bg)",
+            backgroundColor: "var(--color-surface)",
+            borderColor: "var(--color-border)",
             margin: "0 auto",
           }}
         >
           <SignatureCanvas
             ref={sigRef}
-            penColor={INK_COLOR}
+            penColor={INK_COLOR_HEX}
             onEnd={handleEnd}
             canvasProps={{
               width: CANVAS_WIDTH,
