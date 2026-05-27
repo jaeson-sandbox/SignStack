@@ -1900,6 +1900,181 @@ So that I can paste it elsewhere the same way I can in Chrome's built-in PDF vie
 
 ---
 
+## Competitive Differentiation Ideas (post-MVP 1)
+
+**Status:** Direction-setting notes, not stories yet. None of these are MVP 1 work.
+
+**Premise:** SignStack should not try to beat DocuSign at enterprise agreement workflows (recipient verification, envelope routing, integrations, contract lifecycle management). The stronger direction is a **lightweight, local-first, privacy-first PDF utility toolkit** that does a small number of things very well, on the user's device, without an account. The ideas below are roadmap-shaping bets that reinforce that identity; promote them to concrete stories when MVP 1 ships and the priority of each is clear.
+
+### 1. Local-First Privacy Mode
+
+- Make the "never leaves the browser" promise visually unmistakable in the UI (the current footer disclaimer is a baseline, not the ceiling).
+- Add a prominent **"No upload"** trust indicator (e.g., a badge on the toolbar with a tooltip explaining what does and doesn't leave the device).
+- Add an explicit **"Clear document from memory"** action that drops the in-memory `ArrayBuffer`, overlays, and signature, returning the user to the upload surface.
+- Add a privacy technical note to `README.md` explaining the architecture (no API routes, no analytics on document content, etc.).
+
+### 2. Offline / PWA Mode
+
+- Ship SignStack as a Progressive Web App so it works fully after the first load — sign, fill, and export without a network connection.
+- Cache the app bundle, the pdfjs worker, and `public/standard_fonts/` via a service worker.
+- No cloud dependency at any point. Reinforces the privacy promise.
+
+### 3. Smart Form Assist (no accounts, no AI)
+
+- Detect likely blank lines / boxes in the rendered PDF visually or structurally (e.g., long horizontal underscores, square outlines, repeated whitespace gaps).
+- Suggest places where the user might want a text box, date, signature, or checkmark — one-click placement.
+- **Local-first.** No AI / server processing in the initial cut; heuristic-based detection only. Promote to an ML-assisted version only if heuristics prove insufficient and a local model fits the bundle / latency budget.
+
+### 4. Reusable Local Templates
+
+- Let the user save the overlay layout from the current document as a named "template" — same overlays at the same positions on the same page indexes.
+- Apply a saved template to a fresh upload that shares the same form layout (e.g., the same apartment application month after month).
+- Store templates **locally** in browser storage (IndexedDB) for the early version; explicit "Export template" / "Import template" JSON for cross-device transfer. Never cloud-synced.
+
+### 5. PDF Utility Toolkit
+
+A consolidated direction that groups several utilities under one local-first roof:
+
+- Combine PDFs (Phase 3 stub below).
+- Split PDFs.
+- Reorder pages.
+- **Rotate pages** (see the dedicated future story below).
+- Extract pages.
+- **Copy existing selectable PDF text** (see the dedicated future story above).
+- **Text / date / checkmark overlays** (Phase 2 stories above).
+
+These all reuse the existing pdfjs / pdf-lib pipeline and the local-first architecture. Promotable to a unified "Utilities" surface in the editor when more than one is built.
+
+### 6. Trust / Verification Panel
+
+- Surface a small panel summarizing exactly what SignStack changed in the exported PDF — e.g., **"Added 1 visual signature on page 2; added 1 text box on page 1."**
+- Make it explicit that this is **not** a cryptographic / certificate-based digital signature — same disclaimer language as the footer, surfaced at the moment of export so the user is reminded right before sharing.
+- Optional follow-up: a "verify what this PDF claims" mode for received documents — read pdf-lib's metadata and surface any visual-signature overlays detected.
+
+---
+
+## Epic: OCR and Searchable PDFs (post-MVP 1)
+
+**Status:** Not started. Future epic — evaluate **after** MVP 1 ships, Phase 2 (fill-out overlays), Phase 3 (combine PDFs), and the Copy Existing PDF Text story are all stable. Do not add OCR dependencies during MVP 1.
+
+**Product intent:** SignStack should eventually help users **search text inside PDFs** — including scanned / image-only PDFs — while preserving the local-first / browser-first privacy promise. This fits the lightweight PDF utility toolkit direction (Competitive Differentiation #5) and addresses a real gap: most signing tools focus on sending documents for signatures, but users also need lightweight private utilities like "find that clause" in a scanned contract.
+
+**Positioning:** Future differentiator. Reinforces the "local-first PDF toolkit" identity without copying DocuSign's enterprise workflow surface.
+
+### Future Story OCR.1: OCR Scanned PDFs Locally
+
+As a user opening a scanned PDF,
+I want SignStack to extract the page text for me,
+So that I can copy or search content from documents I'd otherwise have to retype.
+
+**Scope:**
+- User can run OCR on scanned / image-only PDF pages from an explicit "Extract text (OCR)" action — not automatic on upload.
+- OCR operates on rendered page images (canvas → image data).
+- OCR runs **locally in the browser** wherever practical.
+- Extracted text is associated with its page number (and, where the OCR engine provides them, per-word bounding boxes for future highlighting).
+- User can copy the OCR-derived text.
+- User can search the OCR-derived text (see OCR.2).
+
+**Out of scope (initial):**
+- Server-side OCR.
+- Cloud upload of any kind.
+- AI summarization.
+- **Embeddings, semantic search, vector databases, RAG.** Explicitly deferred — see roadmap note below.
+- Handwritten-text recognition guarantees (best-effort only).
+- Perfect layout reconstruction (multi-column, tables, headers/footers).
+
+### Future Story OCR.2: Search Extracted PDF Text
+
+As a user reviewing a PDF,
+I want to search across the document's text,
+So that I can jump to the page that mentions what I'm looking for.
+
+**Scope:**
+- User can search across text extracted from the current PDF.
+- Search covers **both**:
+  - native selectable PDF text (via the Copy Existing PDF Text story's text-layer infrastructure), and
+  - OCR-derived text for scanned / image-only pages (OCR.1).
+- Results show page number + matched snippet (a few words of context on each side).
+- Clicking a result jumps to that page.
+- If exact text coordinates are available (e.g., from pdfjs's text layer or per-word OCR bboxes), highlight the match in place.
+- If coordinates are not available, jump to the page and show the snippet in a side panel.
+
+**Out of scope (initial):**
+- Semantic search.
+- Natural-language question answering.
+- AI chat over the document.
+- Cloud indexing.
+- Account-based document libraries (cross-document search across a user's history).
+
+### Future Story OCR.3: Local OCR / Text Data Management
+
+As a user concerned about privacy,
+I want to know what extracted text is stored locally and be able to clear it,
+So that I stay in control of the by-product data SignStack generates.
+
+**Scope:**
+- UI shows whether OCR / search data exists for the current document.
+- User can clear OCR / search data for the current document.
+- User can clear **all** locally stored OCR / search data (across documents, if persistence is enabled).
+- UI clearly explains that extracted text is stored locally if persistence is enabled (and that it's session-only if not).
+- No analytics. No uploads of document text. Same privacy invariants as the rest of the app.
+
+### Architecture notes (OCR epic)
+
+- **Prefer browser-local OCR** — the initial bet is on something like Tesseract-WASM running in a Web Worker. Server-side OCR would break the privacy invariant.
+- Treat the OCR engine as an **optional lazy-loaded module**, not part of the initial app bundle. Users who never run OCR shouldn't pay the bundle cost.
+- Keep OCR / search code in its own folder (e.g. `src/lib/ocr/`, `src/lib/search/`) — **separate from MVP signing / export code**. No cross-imports beyond the public interfaces.
+- **Do not add OCR dependencies during MVP 1.** Any future dependency must be justified by an explicit tradeoff analysis: bundle size, browser support, OCR accuracy, privacy implications, runtime perf.
+- Use **Web Workers** for OCR runs to avoid blocking the UI thread.
+- Index by `{ documentHash, pageIndex, chunkIndex }`. Start with **exact keyword search only** (string `includes` or simple FTS, no analyzers).
+- **Do not add embeddings / semantic search / vector DBs** until exact OCR search is shipped, used, and its limitations are concretely understood. Semantic search adds large model dependencies, complex caching, and a privacy-claim audit; not worth it until the simple path proves valuable.
+- Keep the trust message simple: **documents and extracted text stay on the user's device.**
+
+### Roadmap note (OCR epic)
+
+OCR and exact text search are post-MVP 1 ideas. Evaluate **after** visual signing (Epics 1–7), fill-out overlays (Phase 2), combine PDFs (Phase 3), and Copy Existing PDF Text are working. **Semantic search, embeddings, vector search, and RAG-style features are intentionally deferred and should not be planned until OCR / exact-keyword search is proven valuable.** The order matters: a working dumb feature beats a half-built smart one.
+
+---
+
+## Future Story: Rotate PDF Pages (post-MVP 1)
+
+**Status:** Future PDF utility story. Part of the PDF utility toolkit direction (Competitive Differentiation #5). Implement after MVP signing / export is complete and the coordinate mapping pipeline is stable.
+
+As a user with a scanned or wrong-way-up PDF,
+I want to rotate individual pages (or all pages) before exporting,
+So that the document reads correctly without leaving the browser.
+
+**Product Value:** Common ergonomic fix for scanned-on-a-phone documents and forms that were saved sideways. Currently the user's only recourse is another tool.
+
+**Scope:**
+- User can rotate an individual page **90° clockwise**.
+- User can rotate an individual page **90° counterclockwise** if practical.
+- User can rotate **all pages** in a document if practical (one click).
+- Rotation is **previewed live** in the editor (the rendered page reflects the rotation immediately).
+- Rotation is **preserved in the exported PDF** (the downloaded file opens in the rotated orientation in any viewer).
+- Rotation must compose correctly with the existing page-rendering, page-measurement, coordinate-mapping, and overlay-export models.
+- If overlays exist on a rotated page, **export must remain visually correct** — an overlay placed in the top-right of a page must still appear in the user-visible top-right after rotation, in both the editor and the exported PDF.
+
+**Out of scope (initial):**
+- Arbitrary-angle rotation (only 90° increments).
+- Deskewing scanned pages.
+- Auto-detecting page orientation.
+- OCR-based rotation detection.
+- Server-side PDF processing.
+
+**Architecture notes:**
+- **Prefer pdf-lib's page rotation support** during export (`page.setRotation(degrees(...))`) over re-rasterizing the page.
+- Store rotation as **page-level document state** — likely `pageRotationsByIndex: Map<number, 0 | 90 | 180 | 270>` on `DocumentState`. New reducer action `PAGE_ROTATED { pageIndex, degrees }`.
+- **Rendering must account for rotation** so the preview matches the exported file. react-pdf's `<Page>` accepts a `rotate` prop — use it.
+- **Coordinate mapping must account for rotation** before this feature ships with overlays. The `coordinateMapper.ts` from Story 4.1 needs an extension that takes the page rotation into account when converting screen-px overlay coordinates to PDF-pt; otherwise overlays on rotated pages will be placed incorrectly in the exported file.
+- Keep the feature **local-first / browser-first** like every other PDF utility.
+
+**Depends on:** MVP 1 shipped (Story 4.1's coordinate mapper, Story 6.1's export pipeline). Best implemented after the coordinate mapper is stable and well-tested with non-rotated pages.
+
+**Roadmap note:** Page rotation is part of the future PDF utility toolkit alongside combine, split, reorder, and extract pages (Competitive Differentiation #5). It is **not** part of MVP 1 visual signing.
+
+---
+
 ## Phase 3 — Combine PDFs (post-Phase 2)
 
 **Status:** Not started. Requires its own PRD iteration and architecture pass.
