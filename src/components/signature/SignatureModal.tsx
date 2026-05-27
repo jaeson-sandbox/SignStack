@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { useAppState } from "@/store/useAppState";
+import { captureDrawnSignature } from "@/lib/signature/captureDrawnSignature";
+import { DrawTab, type DrawTabHandle } from "./DrawTab";
 
 type SignatureTab = "draw" | "type";
 
@@ -15,10 +17,17 @@ export function SignatureModal() {
   // Local — survives close/reopen because this component stays mounted.
   // Spec: "Remembers last-used tab in local state (Draw default on first open)."
   const [activeTab, setActiveTab] = useState<SignatureTab>("draw");
+  // Tracks whether the drawn canvas has strokes; gates Use Signature.
+  // Reset to true on every open (see effect below).
+  const [drawnIsEmpty, setDrawnIsEmpty] = useState(true);
 
   const dialogRef = useRef<HTMLDivElement | null>(null);
   // Element that had focus before the modal opened — restored on close.
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  // Imperative handle into DrawTab so we can read the canvas on confirm
+  // and clear it on reopen. The handle is intentionally narrow — see
+  // DrawTabHandle for the exposed surface.
+  const drawTabRef = useRef<DrawTabHandle | null>(null);
 
   const isOpen = state.ui.isSignatureModalOpen;
 
@@ -26,12 +35,38 @@ export function SignatureModal() {
     dispatch({ type: "SIGNATURE_MODAL_CLOSE" });
   }, [dispatch]);
 
+  const handleConfirm = useCallback(() => {
+    if (activeTab !== "draw") return; // Type confirm lands in Story 4.4.
+    const canvas = drawTabRef.current?.getCanvas();
+    if (!canvas) return;
+    const dataUrl = captureDrawnSignature(canvas);
+    if (!dataUrl) return;
+    dispatch({
+      type: "SIGNATURE_CREATED",
+      payload: { dataUrl, type: "drawn" },
+    });
+    dispatch({ type: "SIGNATURE_MODAL_CLOSE" });
+  }, [activeTab, dispatch]);
+
+  // Reset transient draw-tab state whenever the modal flips false → true.
+  // Uses React's "store previous input" pattern (set state during render when
+  // an input changes) instead of useEffect — avoids the set-state-in-effect
+  // anti-pattern and the extra render it would cause.
+  // https://react.dev/reference/react/useState#storing-information-from-previous-renders
+  const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
+  if (isOpen !== prevIsOpen) {
+    setPrevIsOpen(isOpen);
+    if (isOpen) setDrawnIsEmpty(true);
+  }
+
   // Focus management: snapshot the trigger on open, focus the first focusable
-  // inside the dialog. On close, restore focus to the snapshot.
+  // inside the dialog. On close, restore focus to the snapshot. The canvas
+  // clear() is a DOM side-effect so it lives here, not in render.
   useEffect(() => {
     if (isOpen) {
       previousFocusRef.current = document.activeElement as HTMLElement | null;
-      // Defer one frame so the dialog's children are in the DOM.
+      drawTabRef.current?.clear();
+      // Defer focus a frame to be safe across browsers.
       requestAnimationFrame(() => {
         const first =
           dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
@@ -138,18 +173,7 @@ export function SignatureModal() {
         </div>
 
         {activeTab === "draw" ? (
-          <div
-            role="tabpanel"
-            id="signature-tabpanel-draw"
-            aria-labelledby="signature-tab-draw"
-            className="flex h-56 items-center justify-center rounded-md text-sm"
-            style={{
-              backgroundColor: "var(--color-bg)",
-              color: "var(--color-text-muted)",
-            }}
-          >
-            Drawing canvas coming in Story 4.3.
-          </div>
+          <DrawTab ref={drawTabRef} onEmptyChange={setDrawnIsEmpty} />
         ) : (
           <div
             role="tabpanel"
@@ -180,21 +204,39 @@ export function SignatureModal() {
           >
             Cancel
           </button>
-          <button
-            type="button"
-            disabled
-            aria-disabled="true"
-            className="rounded px-3 py-1.5 text-sm font-medium opacity-50 cursor-not-allowed"
-            style={{
-              backgroundColor: "var(--color-accent)",
-              color: "var(--color-surface)",
-            }}
-          >
-            Use Signature
-          </button>
+          <UseSignatureButton
+            // Disabled in Type tab until Story 4.4; in Draw tab until strokes exist.
+            disabled={activeTab !== "draw" || drawnIsEmpty}
+            onConfirm={handleConfirm}
+          />
         </footer>
       </div>
     </div>
+  );
+}
+
+interface UseSignatureButtonProps {
+  disabled: boolean;
+  onConfirm: () => void;
+}
+
+function UseSignatureButton({ disabled, onConfirm }: UseSignatureButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onConfirm}
+      disabled={disabled}
+      aria-disabled={disabled}
+      className={`rounded px-3 py-1.5 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+        disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
+      }`}
+      style={{
+        backgroundColor: "var(--color-accent)",
+        color: "var(--color-surface)",
+      }}
+    >
+      Use Signature
+    </button>
   );
 }
 
