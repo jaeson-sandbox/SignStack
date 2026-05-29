@@ -13,6 +13,24 @@ const { mountedInstances } = vi.hoisted(() => ({
   mountedInstances: [] as FakeSignatureCanvas[],
 }));
 
+// Story 4.4: mock the font loader so TypeTab doesn't try to hit Google Fonts.
+// Resolved synchronously — tests can ignore the loading state.
+vi.mock("@/lib/signature/fontLoader", () => ({
+  loadSignatureFonts: () => Promise.resolve(),
+}));
+
+// Story 4.4: mock the typed renderer so the confirm flow returns a known URL
+// without needing a working canvas backend.
+vi.mock("@/lib/signature/typedSignatureRenderer", () => ({
+  renderTypedSignatureToPng: ({
+    text,
+    fontFamily,
+  }: {
+    text: string;
+    fontFamily: string;
+  }) => `data:image/png;base64,FAKE_TYPED|${text}|${fontFamily}`,
+}));
+
 interface FakeSignatureCanvas {
   _isEmpty: boolean;
   isEmpty(): boolean;
@@ -176,10 +194,8 @@ describe("<SignatureModal /> — tabs", () => {
     expect(typeTab).toHaveAttribute("aria-selected", "false");
     // Draw tabpanel marker: the Clear button only exists in the Draw tab.
     expect(screen.getByRole("button", { name: /^clear$/i })).toBeInTheDocument();
-    // Type tab placeholder text is absent.
-    expect(
-      screen.queryByText(/typed signature input coming in story 4\.4/i),
-    ).not.toBeInTheDocument();
+    // Type tab's "Your name" label is absent (Type tab not active).
+    expect(screen.queryByLabelText(/your name/i)).not.toBeInTheDocument();
   });
 
   it("clicking the Type tab switches the active tab and tabpanel", () => {
@@ -196,10 +212,8 @@ describe("<SignatureModal /> — tabs", () => {
       "aria-selected",
       "false",
     );
-    // Type tabpanel content visible.
-    expect(
-      screen.getByText(/typed signature input coming in story 4\.4/i),
-    ).toBeInTheDocument();
+    // Type tabpanel content visible: the "Your name" input.
+    expect(screen.getByLabelText(/your name/i)).toBeInTheDocument();
     // Draw tab's Clear button is no longer rendered.
     expect(
       screen.queryByRole("button", { name: /^clear$/i }),
@@ -224,9 +238,7 @@ describe("<SignatureModal /> — tabs", () => {
       "aria-selected",
       "true",
     );
-    expect(
-      screen.getByText(/typed signature input coming in story 4\.4/i),
-    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/your name/i)).toBeInTheDocument();
   });
 });
 
@@ -282,6 +294,86 @@ describe("<SignatureModal /> — drawn signature flow", () => {
 
     // Reopen — new SignatureCanvas instance mounted; Use Signature disabled.
     openModal();
+    expect(screen.getByRole("button", { name: /use signature/i })).toBeDisabled();
+  });
+});
+
+describe("<SignatureModal /> — typed signature flow", () => {
+  it("Use Signature is disabled when Type tab is empty", () => {
+    renderModal();
+    openModal();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Type" }));
+
+    expect(screen.getByRole("button", { name: /use signature/i })).toBeDisabled();
+  });
+
+  it("Use Signature enables after typing (fonts mocked to resolve immediately)", async () => {
+    renderModal();
+    openModal();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Type" }));
+    fireEvent.change(screen.getByLabelText(/your name/i), {
+      target: { value: "Alex" },
+    });
+
+    // Microtask flush so TypeTab's font-load + canCapture effect fires.
+    await act(async () => {});
+
+    expect(screen.getByRole("button", { name: /use signature/i })).toBeEnabled();
+  });
+
+  it("clicking Use Signature dispatches SIGNATURE_CREATED with type 'typed' and closes the modal", async () => {
+    renderModal();
+    openModal();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Type" }));
+    fireEvent.change(screen.getByLabelText(/your name/i), {
+      target: { value: "Alex" },
+    });
+    await act(async () => {});
+
+    fireEvent.click(screen.getByRole("button", { name: /use signature/i }));
+
+    const probe = screen.getByTestId("signature-probe");
+    // The mock renderer encodes both text and font into the URL, so we can
+    // assert it actually called the renderer with the right inputs.
+    expect(probe).toHaveTextContent(
+      "data:image/png;base64,FAKE_TYPED|Alex|'Dancing Script', cursive",
+    );
+    expect(probe).toHaveTextContent("|typed|");
+    expect(probe).toHaveTextContent("|closed");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("switching font style does not clear the text", async () => {
+    renderModal();
+    openModal();
+    fireEvent.click(screen.getByRole("tab", { name: "Type" }));
+    fireEvent.change(screen.getByLabelText(/your name/i), {
+      target: { value: "Alex" },
+    });
+    await act(async () => {});
+
+    fireEvent.click(screen.getByRole("radio", { name: "Clean" }));
+
+    expect(screen.getByLabelText(/your name/i)).toHaveValue("Alex");
+  });
+
+  it("clearing the text re-disables Use Signature", async () => {
+    renderModal();
+    openModal();
+    fireEvent.click(screen.getByRole("tab", { name: "Type" }));
+    fireEvent.change(screen.getByLabelText(/your name/i), {
+      target: { value: "Alex" },
+    });
+    await act(async () => {});
+    expect(screen.getByRole("button", { name: /use signature/i })).toBeEnabled();
+
+    fireEvent.change(screen.getByLabelText(/your name/i), {
+      target: { value: "" },
+    });
+
     expect(screen.getByRole("button", { name: /use signature/i })).toBeDisabled();
   });
 });
