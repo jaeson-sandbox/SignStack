@@ -5,6 +5,7 @@ import { X } from "lucide-react";
 import { useAppState } from "@/store/useAppState";
 import { captureDrawnSignature } from "@/lib/signature/captureDrawnSignature";
 import { DrawTab, type DrawTabHandle } from "./DrawTab";
+import { TypeTab, type TypeTabHandle } from "./TypeTab";
 
 type SignatureTab = "draw" | "type";
 
@@ -17,17 +18,20 @@ export function SignatureModal() {
   // Local — survives close/reopen because this component stays mounted.
   // Spec: "Remembers last-used tab in local state (Draw default on first open)."
   const [activeTab, setActiveTab] = useState<SignatureTab>("draw");
-  // Tracks whether the drawn canvas has strokes; gates Use Signature.
-  // Reset to true on every open (see effect below).
+  // Tracks whether the drawn canvas has strokes; gates Use Signature
+  // when activeTab === "draw". Reset to true on every open.
   const [drawnIsEmpty, setDrawnIsEmpty] = useState(true);
+  // Tracks whether the typed input has capturable text (non-empty AND
+  // fonts loaded); gates Use Signature when activeTab === "type".
+  const [typedCanCapture, setTypedCanCapture] = useState(false);
 
   const dialogRef = useRef<HTMLDivElement | null>(null);
   // Element that had focus before the modal opened — restored on close.
   const previousFocusRef = useRef<HTMLElement | null>(null);
-  // Imperative handle into DrawTab so we can read the canvas on confirm
-  // and clear it on reopen. The handle is intentionally narrow — see
-  // DrawTabHandle for the exposed surface.
+  // Imperative handles into the tab components so the modal can capture
+  // on confirm and clear on reopen. Each handle is intentionally narrow.
   const drawTabRef = useRef<DrawTabHandle | null>(null);
+  const typeTabRef = useRef<TypeTabHandle | null>(null);
 
   const isOpen = state.ui.isSignatureModalOpen;
 
@@ -36,14 +40,24 @@ export function SignatureModal() {
   }, [dispatch]);
 
   const handleConfirm = useCallback(() => {
-    if (activeTab !== "draw") return; // Type confirm lands in Story 4.4.
-    const canvas = drawTabRef.current?.getCanvas();
-    if (!canvas) return;
-    const dataUrl = captureDrawnSignature(canvas);
-    if (!dataUrl) return;
+    let dataUrl: string | null = null;
+    let signatureType: "drawn" | "typed" | null = null;
+
+    if (activeTab === "draw") {
+      const canvas = drawTabRef.current?.getCanvas();
+      if (canvas) {
+        dataUrl = captureDrawnSignature(canvas);
+        signatureType = "drawn";
+      }
+    } else {
+      dataUrl = typeTabRef.current?.capture() ?? null;
+      signatureType = "typed";
+    }
+
+    if (!dataUrl || !signatureType) return;
     dispatch({
       type: "SIGNATURE_CREATED",
-      payload: { dataUrl, type: "drawn" },
+      payload: { dataUrl, type: signatureType },
     });
     dispatch({ type: "SIGNATURE_MODAL_CLOSE" });
   }, [activeTab, dispatch]);
@@ -56,7 +70,10 @@ export function SignatureModal() {
   const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
   if (isOpen !== prevIsOpen) {
     setPrevIsOpen(isOpen);
-    if (isOpen) setDrawnIsEmpty(true);
+    if (isOpen) {
+      setDrawnIsEmpty(true);
+      setTypedCanCapture(false);
+    }
   }
 
   // Focus management: snapshot the trigger on open, focus the first focusable
@@ -175,18 +192,10 @@ export function SignatureModal() {
         {activeTab === "draw" ? (
           <DrawTab ref={drawTabRef} onEmptyChange={setDrawnIsEmpty} />
         ) : (
-          <div
-            role="tabpanel"
-            id="signature-tabpanel-type"
-            aria-labelledby="signature-tab-type"
-            className="flex h-56 items-center justify-center rounded-md text-sm"
-            style={{
-              backgroundColor: "var(--color-bg)",
-              color: "var(--color-text-muted)",
-            }}
-          >
-            Typed signature input coming in Story 4.4.
-          </div>
+          <TypeTab
+            ref={typeTabRef}
+            onCanCaptureChange={setTypedCanCapture}
+          />
         )}
 
         <footer
@@ -205,8 +214,12 @@ export function SignatureModal() {
             Cancel
           </button>
           <UseSignatureButton
-            // Disabled in Type tab until Story 4.4; in Draw tab until strokes exist.
-            disabled={activeTab !== "draw" || drawnIsEmpty}
+            // In Draw tab: disabled until strokes exist.
+            // In Type tab: disabled until text exists AND fonts have loaded
+            // (TypeTab's canCapture combines both conditions).
+            disabled={
+              activeTab === "draw" ? drawnIsEmpty : !typedCanCapture
+            }
             onConfirm={handleConfirm}
           />
         </footer>
