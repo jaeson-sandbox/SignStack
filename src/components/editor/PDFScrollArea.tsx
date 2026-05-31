@@ -14,6 +14,9 @@ import {
   extractPageDimensions,
   type PageMeasurementInput,
 } from "@/lib/pdf/pageDimensions";
+import { overlaysForPage } from "@/lib/overlay/overlaySelectors";
+import { SignatureOverlay } from "@/components/overlay/SignatureOverlay";
+import type { Overlay } from "@/types";
 import { PDFPageRenderer } from "./PDFPageRenderer";
 
 // Structural-only — avoids importing PDFDocumentProxy from top-level pdfjs-dist
@@ -222,6 +225,7 @@ export function PDFScrollArea() {
                   containerWidth={CONTAINER_WIDTH_PX}
                   active={isActive(index)}
                   measuredHeightPx={pageHeights.get(index) ?? null}
+                  pageOverlays={overlaysForPage(state.overlays, index)}
                   registerEl={registerPageEl}
                   onPageRendered={handlePageRendered}
                 />
@@ -239,6 +243,8 @@ interface PageSlotProps {
   containerWidth: number;
   active: boolean;
   measuredHeightPx: number | null;
+  /** Overlays whose pageIndex matches this page (already filtered). */
+  pageOverlays: Overlay[];
   registerEl: (pageIndex: number, el: HTMLElement | null) => void;
   onPageRendered: (pageIndex: number, page: PageMeasurementInput) => void;
 }
@@ -249,6 +255,7 @@ function PageSlot({
   containerWidth,
   active,
   measuredHeightPx,
+  pageOverlays,
   registerEl,
   onPageRendered,
 }: PageSlotProps) {
@@ -267,9 +274,14 @@ function PageSlot({
 
   return (
     <div className="flex flex-col items-center gap-1">
+      {/* position: relative establishes the positioning context for the
+          absolutely-positioned react-rnd overlays. The container is always
+          `containerWidth` wide and shrink-wraps to the rendered canvas (or
+          placeholder) height, so overlay px coordinates map 1:1. */}
       <div
         ref={elCallback}
         data-page-index={pageIndex}
+        className="relative"
         style={{ width: containerWidth }}
       >
         {active ? (
@@ -289,6 +301,14 @@ function PageSlot({
             aria-label={`Page ${pageNumber} placeholder`}
           />
         )}
+        {/* Each overlay carries its own snapshotted dataUrl, so a placed
+            signature keeps its image even after the session signature is
+            replaced. An overlay can only have been placed on a measured page,
+            so its coordinates are valid against this container whether the page
+            is active or a height-preserving placeholder. */}
+        {pageOverlays.map((overlay) => (
+          <SignatureOverlay key={overlay.id} overlay={overlay} />
+        ))}
       </div>
       <p
         className="text-xs"

@@ -10,6 +10,7 @@ function makeOverlay(partial: Partial<Overlay> = {}): Overlay {
   return {
     id: partial.id ?? "overlay-1",
     pageIndex: partial.pageIndex ?? 0,
+    dataUrl: partial.dataUrl ?? "data:image/png;base64,FAKE",
     x: partial.x ?? 10,
     y: partial.y ?? 20,
     width: partial.width ?? 200,
@@ -249,6 +250,7 @@ describe("createOverlay factory", () => {
   it("returns an overlay with a v4-shaped UUID id and the supplied fields", () => {
     const overlay = createOverlay({
       pageIndex: 0,
+      dataUrl: "data:image/png;base64,FAKE",
       x: 10,
       y: 20,
       width: 200,
@@ -259,6 +261,7 @@ describe("createOverlay factory", () => {
     );
     expect(overlay).toMatchObject({
       pageIndex: 0,
+      dataUrl: "data:image/png;base64,FAKE",
       x: 10,
       y: 20,
       width: 200,
@@ -267,8 +270,22 @@ describe("createOverlay factory", () => {
   });
 
   it("generates a unique id on each call", () => {
-    const a = createOverlay({ pageIndex: 0, x: 0, y: 0, width: 1, height: 1 });
-    const b = createOverlay({ pageIndex: 0, x: 0, y: 0, width: 1, height: 1 });
+    const a = createOverlay({
+      pageIndex: 0,
+      dataUrl: "data:image/png;base64,FAKE",
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
+    });
+    const b = createOverlay({
+      pageIndex: 0,
+      dataUrl: "data:image/png;base64,FAKE",
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
+    });
     expect(a.id).not.toBe(b.id);
   });
 });
