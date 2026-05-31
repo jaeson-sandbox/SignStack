@@ -46,6 +46,13 @@ const OVERLAY_DELETE_CLASS = "signature-overlay-delete";
 const MIN_WIDTH_PX = 40;
 const MIN_HEIGHT_PX = 20;
 
+// re-resizable renders its corner/edge handles with zIndex 1 (its `edgeBase`
+// style) AFTER our children in DOM order, so the topRight handle — positioned
+// at the exact top-right corner where the delete × lives — would win a z-index
+// tie and swallow delete clicks (starting a resize instead). Stacking the
+// delete control above the handles keeps it clickable. Must stay > 1.
+export const OVERLAY_DELETE_Z_INDEX = 20;
+
 // Enable all 8 resize handles when selected.
 const ALL_RESIZE_HANDLES: ResizeEnable = {
   top: true,
@@ -237,8 +244,9 @@ export function SignatureOverlay({
                 cursor: "pointer",
                 padding: 0,
                 lineHeight: 0,
-                // Above the decorative handles so it's always clickable.
-                zIndex: 1,
+                // Stack above re-resizable's corner handles (zIndex 1) so the ×
+                // wins the overlapping top-right corner and stays clickable.
+                zIndex: OVERLAY_DELETE_Z_INDEX,
               }}
             >
               <X aria-hidden="true" width={12} height={12} />

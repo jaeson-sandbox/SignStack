@@ -24,8 +24,16 @@ vi.mock("react-rnd", async () => {
   };
 });
 
-import { SignatureOverlay } from "@/components/overlay/SignatureOverlay";
+import {
+  SignatureOverlay,
+  OVERLAY_DELETE_Z_INDEX,
+} from "@/components/overlay/SignatureOverlay";
 import type { Overlay } from "@/types";
+
+// re-resizable renders its resize handles with this zIndex (its `edgeBase`
+// style). The delete × overlaps the topRight handle exactly, so it must stack
+// strictly above this value or clicks start a resize instead of deleting.
+const RE_RESIZABLE_HANDLE_Z_INDEX = 1;
 
 function makeOverlay(partial: Partial<Overlay> = {}): Overlay {
   return {
@@ -321,5 +329,33 @@ describe("<SignatureOverlay /> — delete behavior", () => {
     fireEvent.click(queryDeleteButton()!);
     expect(onMove).not.toHaveBeenCalled();
     expect(onResize).not.toHaveBeenCalled();
+  });
+
+  it("delete click does not merely deselect (no onSelect)", () => {
+    const { onSelect, onDelete } = renderOverlay({
+      overlay: makeOverlay({ id: "del-1" }),
+      selected: true,
+    });
+    fireEvent.click(queryDeleteButton()!);
+    expect(onDelete).toHaveBeenCalledWith("del-1");
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("delete button class matches the react-rnd cancel selector", () => {
+    renderOverlay({ selected: true });
+    // The cancel prop tells react-draggable which element must NOT start a drag.
+    // If it stops matching the button's class, a delete press starts a drag.
+    const cancel = lastRndProps().cancel as string;
+    expect(cancel.startsWith(".")).toBe(true);
+    const cancelClass = cancel.slice(1);
+    expect(queryDeleteButton()!).toHaveClass(cancelClass);
+  });
+
+  it("delete button stacks above re-resizable's handles (regression: zIndex tie)", () => {
+    // The topRight resize handle overlaps the × exactly; a zIndex tie let the
+    // handle swallow the click and start a resize instead of deleting.
+    expect(OVERLAY_DELETE_Z_INDEX).toBeGreaterThan(RE_RESIZABLE_HANDLE_Z_INDEX);
+    renderOverlay({ selected: true });
+    expect(queryDeleteButton()!.style.zIndex).toBe(String(OVERLAY_DELETE_Z_INDEX));
   });
 });
