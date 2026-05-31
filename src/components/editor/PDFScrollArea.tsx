@@ -189,6 +189,21 @@ export function PDFScrollArea() {
     });
   }, [mostVisiblePageIndex, state.currentVisiblePageIndex, dispatch]);
 
+  // Overlay selection / deletion wiring (Story 5.3). These are the imperative
+  // shell — the components stay presentational and report intent up.
+  const handleSelectOverlay = useCallback(
+    (id: string) => dispatch({ type: "OVERLAY_SELECTED", payload: { id } }),
+    [dispatch],
+  );
+  const handleDeleteOverlay = useCallback(
+    (id: string) => dispatch({ type: "OVERLAY_DELETED", payload: { id } }),
+    [dispatch],
+  );
+  const handleDeselect = useCallback(
+    () => dispatch({ type: "OVERLAY_SELECTED", payload: { id: null } }),
+    [dispatch],
+  );
+
   // Center the active window on the most-visible page. Before the observer
   // ever fires (page-load), fall back to 0 so pages 0..ACTIVE_WINDOW_RADIUS
   // render — satisfies AC1 ("first 2 pages active on mount").
@@ -226,6 +241,10 @@ export function PDFScrollArea() {
                   active={isActive(index)}
                   measuredHeightPx={pageHeights.get(index) ?? null}
                   pageOverlays={overlaysForPage(state.overlays, index)}
+                  selectedOverlayId={state.selectedOverlayId}
+                  onSelectOverlay={handleSelectOverlay}
+                  onDeleteOverlay={handleDeleteOverlay}
+                  onDeselect={handleDeselect}
                   registerEl={registerPageEl}
                   onPageRendered={handlePageRendered}
                 />
@@ -245,6 +264,12 @@ interface PageSlotProps {
   measuredHeightPx: number | null;
   /** Overlays whose pageIndex matches this page (already filtered). */
   pageOverlays: Overlay[];
+  /** Currently selected overlay id (drives selected chrome). */
+  selectedOverlayId: string | null;
+  onSelectOverlay: (id: string) => void;
+  onDeleteOverlay: (id: string) => void;
+  /** Called when empty page space is clicked, to clear the selection. */
+  onDeselect: () => void;
   registerEl: (pageIndex: number, el: HTMLElement | null) => void;
   onPageRendered: (pageIndex: number, page: PageMeasurementInput) => void;
 }
@@ -256,6 +281,10 @@ function PageSlot({
   active,
   measuredHeightPx,
   pageOverlays,
+  selectedOverlayId,
+  onSelectOverlay,
+  onDeleteOverlay,
+  onDeselect,
   registerEl,
   onPageRendered,
 }: PageSlotProps) {
@@ -277,12 +306,15 @@ function PageSlot({
       {/* position: relative establishes the positioning context for the
           absolutely-positioned react-rnd overlays. The container is always
           `containerWidth` wide and shrink-wraps to the rendered canvas (or
-          placeholder) height, so overlay px coordinates map 1:1. */}
+          placeholder) height, so overlay px coordinates map 1:1.
+          onMouseDown here is the empty-page deselect: overlay clicks
+          stopPropagation, so this only fires for clicks on bare page space. */}
       <div
         ref={elCallback}
         data-page-index={pageIndex}
         className="relative"
         style={{ width: containerWidth }}
+        onMouseDown={onDeselect}
       >
         {active ? (
           <PDFPageRenderer
@@ -307,7 +339,13 @@ function PageSlot({
             so its coordinates are valid against this container whether the page
             is active or a height-preserving placeholder. */}
         {pageOverlays.map((overlay) => (
-          <SignatureOverlay key={overlay.id} overlay={overlay} />
+          <SignatureOverlay
+            key={overlay.id}
+            overlay={overlay}
+            selected={overlay.id === selectedOverlayId}
+            onSelect={onSelectOverlay}
+            onDelete={onDeleteOverlay}
+          />
         ))}
       </div>
       <p

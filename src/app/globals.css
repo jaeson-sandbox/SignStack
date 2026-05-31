@@ -53,3 +53,11 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* Selected-overlay delete control: red on hover/focus (UX-DR9). */
+.signature-overlay-delete:hover,
+.signature-overlay-delete:focus-visible {
+  color: var(--color-surface);
+  background-color: var(--color-danger);
+  border-color: var(--color-danger);
+}
