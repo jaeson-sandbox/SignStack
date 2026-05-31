@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { useAppState } from "@/store/useAppState";
+import { useOverlays } from "@/hooks/useOverlays";
 import { captureDrawnSignature } from "@/lib/signature/captureDrawnSignature";
 import { DrawTab, type DrawTabHandle } from "./DrawTab";
 import { TypeTab, type TypeTabHandle } from "./TypeTab";
@@ -15,6 +16,7 @@ const FOCUSABLE_SELECTOR =
 
 export function SignatureModal() {
   const { state, dispatch } = useAppState();
+  const { addOverlay } = useOverlays();
   // Local — survives close/reopen because this component stays mounted.
   // Spec: "Remembers last-used tab in local state (Draw default on first open)."
   const [activeTab, setActiveTab] = useState<SignatureTab>("draw");
@@ -59,8 +61,19 @@ export function SignatureModal() {
       type: "SIGNATURE_CREATED",
       payload: { dataUrl, type: signatureType },
     });
+
+    // Place the overlay on the currently most-visible page.
+    // If page dimensions haven't been measured yet (page not yet rendered),
+    // skip placement — user can re-open the modal to add another overlay once
+    // the page renders (Story 6.2 revisits this flow).
+    const pageIndex = state.currentVisiblePageIndex ?? 0;
+    const pageDimPx = state.document.pageDimensionsPx.get(pageIndex);
+    if (pageDimPx) {
+      void addOverlay(pageIndex, pageDimPx, dataUrl);
+    }
+
     dispatch({ type: "SIGNATURE_MODAL_CLOSE" });
-  }, [activeTab, dispatch]);
+  }, [activeTab, dispatch, state, addOverlay]);
 
   // Reset transient draw-tab state whenever the modal flips false → true.
   // Uses React's "store previous input" pattern (set state during render when
