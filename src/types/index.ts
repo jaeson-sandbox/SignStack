@@ -16,6 +16,12 @@ export interface SignatureState {
 export interface Overlay {
   id: string;
   pageIndex: number;
+  /**
+   * PNG data URL snapshotted at placement time. Each overlay owns its own
+   * image so replacing the session signature does not retroactively change
+   * already-placed overlays. (Snapshot model — see Story 6.2 architecture note.)
+   */
+  dataUrl: string;
   x: number;
   y: number;
   width: number;

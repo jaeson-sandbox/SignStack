@@ -4,10 +4,11 @@ import { Rnd } from "react-rnd";
 import type { Overlay } from "@/types";
 
 interface SignatureOverlayProps {
-  /** The overlay to render. x/y/width/height are in rendered page pixels. */
+  /**
+   * The overlay to render. x/y/width/height are in rendered page pixels;
+   * dataUrl is the signature PNG snapshotted at placement time.
+   */
   overlay: Overlay;
-  /** PNG data URL of the signature image to display inside the overlay. */
-  dataUrl: string;
 }
 
 /**
@@ -18,11 +19,15 @@ interface SignatureOverlayProps {
  * holds no logic and dispatches nothing. Position/size are controlled directly
  * from overlay state so later stories (keyboard nudge, drag) re-render cleanly.
  *
+ * The image comes from `overlay.dataUrl` (snapshotted per overlay), so each
+ * placed signature keeps its own image even after the session signature is
+ * replaced.
+ *
  * Must be rendered inside a `position: relative` page container — react-rnd
  * positions its container absolutely relative to the nearest positioned
  * ancestor.
  */
-export function SignatureOverlay({ overlay, dataUrl }: SignatureOverlayProps) {
+export function SignatureOverlay({ overlay }: SignatureOverlayProps) {
   return (
     <Rnd
       position={{ x: overlay.x, y: overlay.y }}
@@ -39,7 +44,7 @@ export function SignatureOverlay({ overlay, dataUrl }: SignatureOverlayProps) {
           (fill / intrinsic sizing) fights react-rnd's absolute positioning.
           A plain <img> is the architecture-sanctioned choice (AD-4 / Story 5.2). */}
       <img
-        src={dataUrl}
+        src={overlay.dataUrl}
         alt="Signature"
         draggable={false}
         style={{

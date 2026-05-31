@@ -55,7 +55,7 @@ export function useOverlays() {
       const rect = computeDefaultOverlayRect(pageDimPx, aspectRatio);
       dispatch({
         type: "OVERLAY_ADDED",
-        payload: createOverlay({ pageIndex, ...rect }),
+        payload: createOverlay({ pageIndex, dataUrl, ...rect }),
       });
     },
     [dispatch],

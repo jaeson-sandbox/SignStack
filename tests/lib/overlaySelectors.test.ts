@@ -6,6 +6,7 @@ function makeOverlay(partial: Partial<Overlay> = {}): Overlay {
   return {
     id: partial.id ?? "overlay-1",
     pageIndex: partial.pageIndex ?? 0,
+    dataUrl: partial.dataUrl ?? "data:image/png;base64,FAKE",
     x: partial.x ?? 10,
     y: partial.y ?? 20,
     width: partial.width ?? 200,
