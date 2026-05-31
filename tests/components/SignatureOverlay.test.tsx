@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 
 // react-rnd pulls in react-draggable + re-resizable, which do real DOM/measure
 // work that is noisy and non-deterministic in jsdom. We stub it with a thin
 // component that records the props it received, so the test can assert the
-// display-only configuration (disableDragging / enableResizing=false) and the
-// position/size derived from overlay state — without exercising drag internals.
+// drag/resize configuration and invoke the captured onDragStop / onResizeStop
+// callbacks directly — without exercising drag internals.
 const { rndProps } = vi.hoisted(() => ({
   rndProps: [] as Array<Record<string, unknown>>,
 }));
@@ -15,7 +15,6 @@ vi.mock("react-rnd", async () => {
   return {
     Rnd: (props: Record<string, unknown>) => {
       rndProps.push(props);
-      // Render children inside a div so the overlay chrome is queryable.
       return React.createElement(
         "div",
         { "data-testid": "rnd-stub" },
@@ -45,20 +44,32 @@ interface RenderOpts {
   selected?: boolean;
   onSelect?: (id: string) => void;
   onDelete?: (id: string) => void;
+  onMove?: (id: string, x: number, y: number) => void;
+  onResize?: (
+    id: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ) => void;
 }
 
 function renderOverlay(opts: RenderOpts = {}) {
   const onSelect = opts.onSelect ?? vi.fn();
   const onDelete = opts.onDelete ?? vi.fn();
+  const onMove = opts.onMove ?? vi.fn();
+  const onResize = opts.onResize ?? vi.fn();
   render(
     <SignatureOverlay
       overlay={opts.overlay ?? makeOverlay()}
       selected={opts.selected ?? false}
       onSelect={onSelect}
       onDelete={onDelete}
+      onMove={onMove}
+      onResize={onResize}
     />,
   );
-  return { onSelect, onDelete };
+  return { onSelect, onDelete, onMove, onResize };
 }
 
 function lastRndProps(): Record<string, unknown> {
@@ -67,21 +78,37 @@ function lastRndProps(): Record<string, unknown> {
   return last;
 }
 
+/** The inner wrapper div is the image's parent. */
 function getOverlayBody(): HTMLElement {
-  return screen.getByRole("button", { name: /signature overlay/i });
+  const parent = screen.getByRole("img", { name: /signature/i }).parentElement;
+  if (!parent) throw new Error("overlay body not found");
+  return parent;
 }
 
 function queryDeleteButton(): HTMLElement | null {
   return screen.queryByRole("button", { name: /delete signature/i });
 }
 
+// Minimal callback shapes for invoking the captured react-rnd handlers.
+type DragCb = (e: unknown, data: { x: number; y: number }) => void;
+type ResizeCb = (
+  e: unknown,
+  dir: unknown,
+  ref: { offsetWidth: number; offsetHeight: number },
+  delta: unknown,
+  position: { x: number; y: number },
+) => void;
+type StartCb = (e: unknown, data: unknown) => void;
+
 describe("<SignatureOverlay /> — image rendering", () => {
   it("renders an img sourced from the overlay's own snapshotted data URL", () => {
     renderOverlay({
       overlay: makeOverlay({ dataUrl: "data:image/png;base64,OWN_SIG" }),
     });
-    const img = screen.getByRole("img", { name: /signature/i });
-    expect(img).toHaveAttribute("src", "data:image/png;base64,OWN_SIG");
+    expect(screen.getByRole("img", { name: /signature/i })).toHaveAttribute(
+      "src",
+      "data:image/png;base64,OWN_SIG",
+    );
   });
 
   it("renders each overlay with its own image (not a shared session signature)", () => {
@@ -91,6 +118,8 @@ describe("<SignatureOverlay /> — image rendering", () => {
         selected={false}
         onSelect={vi.fn()}
         onDelete={vi.fn()}
+        onMove={vi.fn()}
+        onResize={vi.fn()}
       />,
     );
     expect(screen.getByRole("img", { name: /signature/i })).toHaveAttribute(
@@ -105,6 +134,8 @@ describe("<SignatureOverlay /> — image rendering", () => {
         selected={false}
         onSelect={vi.fn()}
         onDelete={vi.fn()}
+        onMove={vi.fn()}
+        onResize={vi.fn()}
       />,
     );
     expect(screen.getByRole("img", { name: /signature/i })).toHaveAttribute(
@@ -113,7 +144,7 @@ describe("<SignatureOverlay /> — image rendering", () => {
     );
   });
 
-  it("marks the image as non-draggable and non-interactive (clicks fall through to the body)", () => {
+  it("keeps the image itself non-interactive so gestures reach react-rnd", () => {
     renderOverlay();
     const img = screen.getByRole("img", { name: /signature/i });
     expect(img).toHaveAttribute("draggable", "false");
@@ -133,24 +164,103 @@ describe("<SignatureOverlay /> — position and size from overlay state", () => 
   });
 });
 
-describe("<SignatureOverlay /> — display-only behavior (no drag/resize)", () => {
-  it("disables dragging", () => {
+describe("<SignatureOverlay /> — drag/resize configuration", () => {
+  it("enables dragging", () => {
     renderOverlay();
-    expect(lastRndProps().disableDragging).toBe(true);
+    expect(lastRndProps().disableDragging).toBe(false);
   });
 
-  it("disables resizing", () => {
-    renderOverlay();
+  it("enables all 8 resize handles when selected", () => {
+    renderOverlay({ selected: true });
+    expect(lastRndProps().enableResizing).toEqual({
+      top: true,
+      right: true,
+      bottom: true,
+      left: true,
+      topRight: true,
+      bottomRight: true,
+      bottomLeft: true,
+      topLeft: true,
+    });
+  });
+
+  it("disables resizing when not selected", () => {
+    renderOverlay({ selected: false });
     expect(lastRndProps().enableResizing).toBe(false);
   });
 
-  it("registers no drag or resize callbacks (display-only)", () => {
+  it("clamps interaction to the page container via bounds='parent'", () => {
     renderOverlay();
-    const props = lastRndProps();
-    expect(props.onDragStop).toBeUndefined();
-    expect(props.onResizeStop).toBeUndefined();
-    expect(props.onDrag).toBeUndefined();
-    expect(props.onResize).toBeUndefined();
+    expect(lastRndProps().bounds).toBe("parent");
+  });
+
+  it("sets the minimum size (40 × 20)", () => {
+    renderOverlay();
+    expect(lastRndProps().minWidth).toBe(40);
+    expect(lastRndProps().minHeight).toBe(20);
+  });
+
+  it("does not lock the aspect ratio", () => {
+    renderOverlay();
+    expect(lastRndProps().lockAspectRatio).toBe(false);
+  });
+
+  it("excludes the delete control from drag via the cancel selector", () => {
+    renderOverlay();
+    expect(lastRndProps().cancel).toBe(".signature-overlay-delete");
+  });
+});
+
+describe("<SignatureOverlay /> — drag behavior", () => {
+  it("selects the overlay when a drag starts", () => {
+    const { onSelect } = renderOverlay({ overlay: makeOverlay({ id: "d-1" }) });
+    (lastRndProps().onDragStart as StartCb)({}, {});
+    expect(onSelect).toHaveBeenCalledWith("d-1");
+  });
+
+  it("dispatches move with rounded x/y on drag stop", () => {
+    const { onMove } = renderOverlay({ overlay: makeOverlay({ id: "d-1" }) });
+    (lastRndProps().onDragStop as DragCb)({}, { x: 120.6, y: 60.4 });
+    expect(onMove).toHaveBeenCalledWith("d-1", 121, 60);
+  });
+
+  it("renders at full opacity when idle", () => {
+    renderOverlay();
+    expect((lastRndProps().style as React.CSSProperties).opacity).toBe(1);
+  });
+
+  it("shows 85% opacity while dragging", () => {
+    renderOverlay();
+    act(() => {
+      (lastRndProps().onDrag as DragCb)({}, { x: 10, y: 10 });
+    });
+    expect((lastRndProps().style as React.CSSProperties).opacity).toBe(0.85);
+  });
+});
+
+describe("<SignatureOverlay /> — resize behavior", () => {
+  it("selects the overlay when a resize starts", () => {
+    const { onSelect } = renderOverlay({
+      overlay: makeOverlay({ id: "r-1" }),
+      selected: true,
+    });
+    (lastRndProps().onResizeStart as StartCb)({}, {});
+    expect(onSelect).toHaveBeenCalledWith("r-1");
+  });
+
+  it("dispatches resize with the committed position and offset dimensions", () => {
+    const { onResize } = renderOverlay({
+      overlay: makeOverlay({ id: "r-1" }),
+      selected: true,
+    });
+    (lastRndProps().onResizeStop as ResizeCb)(
+      {},
+      "bottomRight",
+      { offsetWidth: 150, offsetHeight: 70 },
+      {},
+      { x: 10.2, y: 20.8 },
+    );
+    expect(onResize).toHaveBeenCalledWith("r-1", 10, 21, 150, 70);
   });
 });
 
@@ -160,10 +270,11 @@ describe("<SignatureOverlay /> — unselected visual state", () => {
     expect(queryDeleteButton()).not.toBeInTheDocument();
   });
 
-  it("shows no resize handles when unselected", () => {
+  it("shows no resize-handle markers when unselected", () => {
     renderOverlay({ selected: false });
-    const body = getOverlayBody();
-    expect(body.querySelectorAll("[data-overlay-handle]").length).toBe(0);
+    expect(
+      getOverlayBody().querySelectorAll("[data-overlay-handle]").length,
+    ).toBe(0);
   });
 
   it("does not paint a dashed border when unselected", () => {
@@ -180,10 +291,9 @@ describe("<SignatureOverlay /> — selected visual state", () => {
 
   it("renders 8 resize-handle markers when selected", () => {
     renderOverlay({ selected: true });
-    const handles = Array.from(
-      getOverlayBody().querySelectorAll<HTMLElement>("[data-overlay-handle]"),
-    );
-    expect(handles).toHaveLength(8);
+    expect(
+      getOverlayBody().querySelectorAll("[data-overlay-handle]").length,
+    ).toBe(8);
   });
 
   it("paints a dashed selection border when selected", () => {
@@ -192,86 +302,24 @@ describe("<SignatureOverlay /> — selected visual state", () => {
   });
 });
 
-describe("<SignatureOverlay /> — selection behavior", () => {
-  it("calls onSelect with the overlay id when the body is pressed", () => {
-    const onSelect = vi.fn();
-    renderOverlay({ overlay: makeOverlay({ id: "sel-1" }), onSelect });
-
-    fireEvent.mouseDown(getOverlayBody());
-
-    expect(onSelect).toHaveBeenCalledTimes(1);
-    expect(onSelect).toHaveBeenCalledWith("sel-1");
-  });
-
-  it("stops propagation on body press so the page deselect handler doesn't fire", () => {
-    const pageMouseDown = vi.fn();
-    const onSelect = vi.fn();
-    render(
-      <div onMouseDown={pageMouseDown}>
-        <SignatureOverlay
-          overlay={makeOverlay({ id: "sel-1" })}
-          selected={false}
-          onSelect={onSelect}
-          onDelete={vi.fn()}
-        />
-      </div>,
-    );
-
-    fireEvent.mouseDown(getOverlayBody());
-
-    expect(onSelect).toHaveBeenCalledWith("sel-1");
-    expect(pageMouseDown).not.toHaveBeenCalled();
-  });
-});
-
 describe("<SignatureOverlay /> — delete behavior", () => {
   it("calls onDelete with the overlay id when the × is clicked", () => {
-    const onDelete = vi.fn();
-    renderOverlay({
+    const { onDelete } = renderOverlay({
       overlay: makeOverlay({ id: "del-1" }),
       selected: true,
-      onDelete,
     });
-
     fireEvent.click(queryDeleteButton()!);
-
     expect(onDelete).toHaveBeenCalledTimes(1);
     expect(onDelete).toHaveBeenCalledWith("del-1");
   });
 
-  it("delete click does not also trigger onSelect", () => {
-    const onSelect = vi.fn();
-    const onDelete = vi.fn();
-    renderOverlay({
+  it("delete click does not trigger move or resize", () => {
+    const { onMove, onResize } = renderOverlay({
       overlay: makeOverlay({ id: "del-1" }),
       selected: true,
-      onSelect,
-      onDelete,
     });
-
-    const del = queryDeleteButton()!;
-    fireEvent.mouseDown(del);
-    fireEvent.click(del);
-
-    expect(onDelete).toHaveBeenCalledWith("del-1");
-    expect(onSelect).not.toHaveBeenCalled();
-  });
-
-  it("delete press stops propagation so the page deselect handler doesn't fire", () => {
-    const pageMouseDown = vi.fn();
-    render(
-      <div onMouseDown={pageMouseDown}>
-        <SignatureOverlay
-          overlay={makeOverlay({ id: "del-1" })}
-          selected
-          onSelect={vi.fn()}
-          onDelete={vi.fn()}
-        />
-      </div>,
-    );
-
-    fireEvent.mouseDown(queryDeleteButton()!);
-
-    expect(pageMouseDown).not.toHaveBeenCalled();
+    fireEvent.click(queryDeleteButton()!);
+    expect(onMove).not.toHaveBeenCalled();
+    expect(onResize).not.toHaveBeenCalled();
   });
 });
