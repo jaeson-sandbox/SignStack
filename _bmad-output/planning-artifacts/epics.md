@@ -11,7 +11,7 @@ status: complete
 
 ## Overview
 
-This document decomposes SignStack MVP 1 requirements into 7 epics and 22 stories. Every story is sized for a single Claude Code implementation session and one PR. Stories are sequentially ordered so each builds only on previously completed work. Phase 2 (text/date/checkmark overlays) and Phase 3 (combine PDFs) appear only as out-of-scope callouts within relevant stories.
+This document decomposes SignStack MVP 1 requirements into 7 epics and 23 stories. Every story is sized for a single Claude Code implementation session and one PR. Stories are sequentially ordered so each builds only on previously completed work. Phase 2 (text/date/checkmark overlays) and Phase 3 (combine PDFs) appear only as out-of-scope callouts within relevant stories. (Story 5.6 — overlay copy/paste — is a post-baseline productivity enhancement added to Epic 5; it is not tied to a numbered FR.)
 
 ---
 
@@ -144,9 +144,9 @@ Users create a Signature — either drawn on a canvas or typed with a font style
 **Stories:** 4.1, 4.2, 4.3, 4.4
 
 ### Epic 5: Signature Overlay
-Users place, move, resize, and delete Signature Overlays on any page. Keyboard nudge and delete complete accessibility requirements.
+Users place, move, resize, and delete Signature Overlays on any page. Keyboard nudge and delete complete accessibility requirements. Copy/paste lets users reuse an overlay across pages.
 **FRs covered:** FR-11, FR-13, FR-14, FR-15; NFR-A3
-**Stories:** 5.1, 5.2, 5.3, 5.4, 5.5
+**Stories:** 5.1, 5.2, 5.3, 5.4, 5.5, 5.6 (5.6 is a productivity enhancement, not tied to a numbered FR)
 
 ### Epic 6: PDF Export
 Users export the Signed Document. All Overlays are embedded into the PDF at correct positions. Multiple overlays across multiple pages are supported. The "Add Another" flow completes the multi-signature UX.
@@ -1366,6 +1366,117 @@ Then the modal input is not affected — keyboard handler is inactive while moda
 
 **Branch:** `story/keyboard-nudge-delete`
 **PR Title:** `feat: keyboard arrow nudge and delete for selected overlay (NFR-A3)`
+
+---
+
+### Story 5.6: Copy/Paste Signature Overlays Across Pages
+
+As a user signing a multi-page document,
+I want to copy a signature overlay and paste it onto the same page or another page,
+So that I can quickly reuse the same signature without re-creating or re-positioning it each time.
+
+**Product Value:** Removes repetitive placement work in the most common real-world flow — initialing or signing every page of a contract. Builds directly on the existing overlay model: a pasted overlay is just another `Overlay` entry, so it inherits move/resize/delete/nudge/export for free. Reinforces the local-first identity (an internal app clipboard, no OS clipboard, no upload).
+
+**Technical Context:**
+- **Internal app clipboard only.** Copy stores a snapshot of the selected overlay's payload (`dataUrl`, `width`, `height`, and source `pageIndex`) in memory — not the OS clipboard. No image bytes touch `navigator.clipboard`. This keeps the feature aligned with FR-20 / NFR-PV1 (zero document content leaves the device) and avoids clipboard-permission prompts.
+- **Clipboard location:** a small in-memory store. Options to decide at implementation time: a dedicated `useOverlayClipboard.ts` hook holding a `useRef`/`useState` snapshot, or a `clipboard` slice on `AppState` with `OVERLAY_COPIED` / `OVERLAY_PASTED` actions. Prefer keeping the snapshot out of the reducer if it is purely ephemeral UI state, mirroring the `isDragging` decision in Story 5.4; promote it into `AppState` only if paste needs to survive re-renders in a way local state cannot provide.
+- **Keyboard shell:** reuse the Story 5.5 pattern (AD-6). Copy/paste shortcuts are wired through the same document-level keyboard concern as nudge/delete (e.g. extend `useKeyboardOverlay` or add a sibling `useOverlayClipboard` hook), so the guard logic (modal-closed, not a typing target) is shared, not duplicated.
+- **Pure helpers:** paste placement (same-page offset, destination selection, bounds clamp) goes in `src/lib/overlay/` pure functions, unit-tested in isolation — consistent with `overlayPlacement.ts`, `overlayKeyboard.ts`, and `overlayDom.ts`. Reuse the existing `clampOverlayPosition` from `overlayKeyboard.ts` (or a shared clamp) for the destination-bounds clamp.
+- **New id at paste, not copy:** the pasted overlay is minted with `createOverlay(...)` (fresh `crypto.randomUUID()`) at the dispatch site, dispatched via the existing `OVERLAY_ADDED`. The reducer stays pure — no new id minting inside it.
+- **Same coordinate space:** paste uses rendered-page px and `state.document.pageDimensionsPx` for the destination page, identical to Stories 5.1/5.4/5.5. No PDF-point conversion here — that remains Story 6.1's `coordinateMapper`.
+
+**Acceptance Criteria:**
+
+Given a signature overlay is selected and the modal is closed,
+When the user presses Ctrl+C / Cmd+C,
+Then that overlay's payload (`dataUrl`, `width`, `height`, source `pageIndex`) is copied into an in-memory overlay clipboard.
+
+Given the overlay clipboard is non-empty,
+When the user presses Ctrl+V / Cmd+V,
+Then a new overlay is pasted using the copied payload.
+
+Given an overlay is pasted,
+When it renders,
+Then it preserves the original overlay's `dataUrl` snapshot, `width`, `height`, and visual appearance.
+
+Given an overlay is pasted,
+When the new overlay is added to state,
+Then it receives a new unique id (via `createOverlay`) and is fully independent of the original (moving/deleting one does not affect the other).
+
+Given the copied overlay is pasted onto the same page as its source,
+When it appears,
+Then it is offset slightly from the original (e.g. +N px down-right) so it is visible and not perfectly stacked, and the offset is clamped to keep it on-page.
+
+Given the user copies an overlay on one page and the current visible page is a different page,
+When the user pastes,
+Then the new overlay is placed on the current visible page (paste targets `state.currentVisiblePageIndex` when appropriate).
+
+Given a paste onto any destination page,
+When the new overlay is positioned,
+Then its x/y/width/height are clamped within that page's bounds using `pageDimensionsPx` for the destination page.
+
+Given an overlay has just been pasted,
+When the paste completes,
+Then the pasted overlay becomes the selected overlay (`selectedOverlayId` points at the new id).
+
+Given the signature modal is open,
+When the user presses Ctrl+C / Cmd+C or Ctrl+V / Cmd+V,
+Then no copy/paste of overlays occurs (shortcuts are inactive while the modal is open).
+
+Given focus is inside an input, textarea, or contenteditable element,
+When the user presses the copy/paste shortcut,
+Then overlay copy/paste does not fire and normal text copy/paste is unaffected (reuse `isTypingTarget`).
+
+Given any combination of copy/paste actions,
+When overlays are created via paste,
+Then existing overlay behavior remains intact for every overlay: selection, delete, drag, resize, keyboard nudge, and per-overlay `dataUrl` snapshots.
+
+Given pasted overlays exist in `state.overlays`,
+When the user later exports (Epic 6),
+Then pasted overlays are embedded exactly like any other overlay — no special-casing is required, because they are ordinary overlay-state entries.
+
+**Files Likely to Change (at implementation time):**
+- `src/hooks/useOverlayClipboard.ts` — create; copy/paste keyboard wiring (or extend `useKeyboardOverlay.ts`)
+- `src/lib/overlay/overlayClipboard.ts` (or extend an existing `lib/overlay` module) — create; pure paste-placement / offset / clamp helpers
+- `src/components/editor/PDFScrollArea.tsx` — mount the hook alongside `useKeyboardOverlay`
+- `src/store/appReducer.ts` / `src/types/index.ts` — only if a `clipboard` slice + actions are chosen over a local-state clipboard
+- `tests/lib/overlayClipboard.test.ts`, `tests/hooks/useOverlayClipboard.test.tsx` — create
+
+**Implementation Notes:**
+- `e.preventDefault()` on the handled copy/paste combos only when an overlay is selected (copy) or the clipboard is non-empty (paste) and the target is not a typing context — never blanket-override the browser's native copy/paste.
+- Decide the same-page offset constant (e.g. 16–24 px) during implementation; clamp the offset result so an overlay copied near the bottom-right edge still lands fully on-page.
+- Detect the platform modifier with `event.ctrlKey || event.metaKey` so both Windows/Linux (Ctrl) and macOS (Cmd) work.
+- Do not serialize overlay data to `localStorage`/`IndexedDB` — the clipboard is session-only, matching the architecture's "everything in memory" contract.
+
+**Manual Verification Steps:**
+1. Create a signature, select the overlay → Ctrl/Cmd+C → Ctrl/Cmd+V → a second, slightly-offset copy appears on the same page and is selected
+2. Move/delete the pasted copy → the original is unaffected (independence)
+3. Scroll to another page → Ctrl/Cmd+V → the copy lands on the now-visible page, clamped on-page
+4. Paste near an edge → the overlay stays fully within the page bounds
+5. Open the signature modal → Ctrl/Cmd+C / Ctrl/Cmd+V do nothing to overlays; typing in the Type tab copies/pastes text normally
+6. Drag/resize/nudge/delete still work on both original and pasted overlays
+7. (After Epic 6) Export → both original and pasted overlays appear in the output PDF
+
+**Test Ideas:**
+- Pure: same-page paste offset produces a visible, on-page, clamped rect; cross-page paste clamps to the destination `pageDimensionsPx`; offset near an edge clamps inward.
+- Hook: Ctrl/Cmd+C with a selection populates the clipboard; Ctrl/Cmd+V dispatches `OVERLAY_ADDED` with a new id and selects it; no-op when clipboard empty, when modal open, or when target is a typing context.
+- Reducer (if a clipboard slice is added): copy/paste transitions are pure and immutable; pasted overlay is independent.
+
+**Out of Scope:**
+- Copying existing PDF text (see the separate "Copy Existing PDF Text" future story).
+- Copying arbitrary images from the OS clipboard, or pasting external image files.
+- Multi-select copy/paste (one overlay at a time for this story).
+- Cloud sync of the clipboard; cross-tab or cross-session clipboard persistence.
+- API routes / backend.
+- The PDF export implementation itself (Epic 6).
+- Text / date / checkmark overlays (Phase 2) unless those overlay types already exist when this is implemented — if they do, copy/paste should generalize over the `Overlay` discriminator rather than assume "signature".
+
+**Depends On:** Story 5.5 (keyboard concern + pure overlay helpers it can reuse).
+
+**Why this sequences before Epic 6:** Copy/paste is purely an overlay-layer concern — it produces ordinary `Overlay` entries and touches none of the pdf-lib export pipeline. Completing it before export means (1) the export stories (6.1/6.2) automatically embed pasted overlays with zero special-casing and can include them in their test fixtures; (2) the multi-overlay/multi-page scenarios export must handle are richer and more realistically exercised; and (3) it extends the freshly-built Story 5.5 keyboard shell and pure clamp helpers while that pattern is current, keeping the export epic focused solely on pdf-lib embedding.
+
+**Branch:** `story/overlay-copy-paste`
+**PR Title:** `feat: copy/paste signature overlays across pages (internal clipboard)`
 
 ---
 
