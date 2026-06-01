@@ -15,6 +15,7 @@ import {
   type PageMeasurementInput,
 } from "@/lib/pdf/pageDimensions";
 import { overlaysForPage } from "@/lib/overlay/overlaySelectors";
+import { useKeyboardOverlay } from "@/hooks/useKeyboardOverlay";
 import {
   SignatureOverlay,
   OVERLAY_RND_CLASS,
@@ -216,6 +217,25 @@ export function PDFScrollArea() {
       dispatch({ type: "OVERLAY_RESIZED", payload: { id, x, y, width, height } }),
     [dispatch],
   );
+
+  // Keyboard nudge / delete for the selected overlay (Story 5.5, AD-6). The
+  // pure nudge/clamp math lives in lib/overlay/overlayKeyboard.ts; this hook is
+  // the document-level listener shell. Clamp uses the overlay's own page dims.
+  const selectedOverlay = useMemo(
+    () =>
+      state.overlays.find((o) => o.id === state.selectedOverlayId) ?? null,
+    [state.overlays, state.selectedOverlayId],
+  );
+  const selectedOverlayPageDimPx =
+    selectedOverlay !== null
+      ? (state.document.pageDimensionsPx.get(selectedOverlay.pageIndex) ?? null)
+      : null;
+  useKeyboardOverlay({
+    selectedOverlay,
+    pageDimPx: selectedOverlayPageDimPx,
+    isModalOpen: state.ui.isSignatureModalOpen,
+    dispatch,
+  });
 
   // Center the active window on the most-visible page. Before the observer
   // ever fires (page-load), fall back to 0 so pages 0..ACTIVE_WINDOW_RADIUS
