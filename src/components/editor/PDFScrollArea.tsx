@@ -15,7 +15,10 @@ import {
   type PageMeasurementInput,
 } from "@/lib/pdf/pageDimensions";
 import { overlaysForPage } from "@/lib/overlay/overlaySelectors";
-import { SignatureOverlay } from "@/components/overlay/SignatureOverlay";
+import {
+  SignatureOverlay,
+  OVERLAY_RND_CLASS,
+} from "@/components/overlay/SignatureOverlay";
 import type { Overlay } from "@/types";
 import { PDFPageRenderer } from "./PDFPageRenderer";
 
@@ -203,6 +206,16 @@ export function PDFScrollArea() {
     () => dispatch({ type: "OVERLAY_SELECTED", payload: { id: null } }),
     [dispatch],
   );
+  const handleMoveOverlay = useCallback(
+    (id: string, x: number, y: number) =>
+      dispatch({ type: "OVERLAY_MOVED", payload: { id, x, y } }),
+    [dispatch],
+  );
+  const handleResizeOverlay = useCallback(
+    (id: string, x: number, y: number, width: number, height: number) =>
+      dispatch({ type: "OVERLAY_RESIZED", payload: { id, x, y, width, height } }),
+    [dispatch],
+  );
 
   // Center the active window on the most-visible page. Before the observer
   // ever fires (page-load), fall back to 0 so pages 0..ACTIVE_WINDOW_RADIUS
@@ -244,6 +257,8 @@ export function PDFScrollArea() {
                   selectedOverlayId={state.selectedOverlayId}
                   onSelectOverlay={handleSelectOverlay}
                   onDeleteOverlay={handleDeleteOverlay}
+                  onMoveOverlay={handleMoveOverlay}
+                  onResizeOverlay={handleResizeOverlay}
                   onDeselect={handleDeselect}
                   registerEl={registerPageEl}
                   onPageRendered={handlePageRendered}
@@ -268,6 +283,14 @@ interface PageSlotProps {
   selectedOverlayId: string | null;
   onSelectOverlay: (id: string) => void;
   onDeleteOverlay: (id: string) => void;
+  onMoveOverlay: (id: string, x: number, y: number) => void;
+  onResizeOverlay: (
+    id: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ) => void;
   /** Called when empty page space is clicked, to clear the selection. */
   onDeselect: () => void;
   registerEl: (pageIndex: number, el: HTMLElement | null) => void;
@@ -284,6 +307,8 @@ function PageSlot({
   selectedOverlayId,
   onSelectOverlay,
   onDeleteOverlay,
+  onMoveOverlay,
+  onResizeOverlay,
   onDeselect,
   registerEl,
   onPageRendered,
@@ -301,20 +326,32 @@ function PageSlot({
     [onPageRendered, pageIndex],
   );
 
+  // Deselect only when the press lands on bare page space. Overlay presses
+  // (body, react-rnd resize handles, delete) all originate inside the
+  // `.signature-overlay-rnd` root, so `.closest` filters them out without the
+  // overlay needing stopPropagation (which would break react-draggable).
+  const handlePageMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if ((e.target as HTMLElement).closest(`.${OVERLAY_RND_CLASS}`)) return;
+      onDeselect();
+    },
+    [onDeselect],
+  );
+
   return (
     <div className="flex flex-col items-center gap-1">
       {/* position: relative establishes the positioning context for the
           absolutely-positioned react-rnd overlays. The container is always
           `containerWidth` wide and shrink-wraps to the rendered canvas (or
           placeholder) height, so overlay px coordinates map 1:1.
-          onMouseDown here is the empty-page deselect: overlay clicks
-          stopPropagation, so this only fires for clicks on bare page space. */}
+          onMouseDown deselects, but only for clicks on bare page space — see
+          handlePageMouseDown's `.closest` guard. */}
       <div
         ref={elCallback}
         data-page-index={pageIndex}
         className="relative"
         style={{ width: containerWidth }}
-        onMouseDown={onDeselect}
+        onMouseDown={handlePageMouseDown}
       >
         {active ? (
           <PDFPageRenderer
@@ -345,6 +382,8 @@ function PageSlot({
             selected={overlay.id === selectedOverlayId}
             onSelect={onSelectOverlay}
             onDelete={onDeleteOverlay}
+            onMove={onMoveOverlay}
+            onResize={onResizeOverlay}
           />
         ))}
       </div>
