@@ -15,11 +15,9 @@ import {
   type PageMeasurementInput,
 } from "@/lib/pdf/pageDimensions";
 import { overlaysForPage } from "@/lib/overlay/overlaySelectors";
+import { isOverlayEventTarget } from "@/lib/overlay/overlayDom";
 import { useKeyboardOverlay } from "@/hooks/useKeyboardOverlay";
-import {
-  SignatureOverlay,
-  OVERLAY_RND_CLASS,
-} from "@/components/overlay/SignatureOverlay";
+import { SignatureOverlay } from "@/components/overlay/SignatureOverlay";
 import type { Overlay } from "@/types";
 import { PDFPageRenderer } from "./PDFPageRenderer";
 
@@ -203,9 +201,18 @@ export function PDFScrollArea() {
     (id: string) => dispatch({ type: "OVERLAY_DELETED", payload: { id } }),
     [dispatch],
   );
-  const handleDeselect = useCallback(
-    () => dispatch({ type: "OVERLAY_SELECTED", payload: { id: null } }),
-    [dispatch],
+  // Click-to-deselect for the whole editor surface. Fires for any mousedown in
+  // the scroll area that did NOT originate inside an overlay — page space, the
+  // gray gutter around/between pages, and the page captions all deselect. The
+  // `.closest` guard (via isOverlayEventTarget) means overlays don't need to
+  // stopPropagation, which would break react-draggable.
+  const handleSurfaceMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLElement>) => {
+      if (isOverlayEventTarget(e.target)) return;
+      if (state.selectedOverlayId === null) return;
+      dispatch({ type: "OVERLAY_SELECTED", payload: { id: null } });
+    },
+    [dispatch, state.selectedOverlayId],
   );
   const handleMoveOverlay = useCallback(
     (id: string, x: number, y: number) =>
@@ -254,6 +261,7 @@ export function PDFScrollArea() {
       ref={scrollRef}
       className="flex-1 overflow-y-auto px-6 py-8"
       style={{ backgroundColor: "var(--color-bg)" }}
+      onMouseDown={handleSurfaceMouseDown}
     >
       <div
         className="mx-auto flex flex-col gap-6"
@@ -279,7 +287,6 @@ export function PDFScrollArea() {
                   onDeleteOverlay={handleDeleteOverlay}
                   onMoveOverlay={handleMoveOverlay}
                   onResizeOverlay={handleResizeOverlay}
-                  onDeselect={handleDeselect}
                   registerEl={registerPageEl}
                   onPageRendered={handlePageRendered}
                 />
@@ -311,8 +318,6 @@ interface PageSlotProps {
     width: number,
     height: number,
   ) => void;
-  /** Called when empty page space is clicked, to clear the selection. */
-  onDeselect: () => void;
   registerEl: (pageIndex: number, el: HTMLElement | null) => void;
   onPageRendered: (pageIndex: number, page: PageMeasurementInput) => void;
 }
@@ -329,7 +334,6 @@ function PageSlot({
   onDeleteOverlay,
   onMoveOverlay,
   onResizeOverlay,
-  onDeselect,
   registerEl,
   onPageRendered,
 }: PageSlotProps) {
@@ -346,32 +350,19 @@ function PageSlot({
     [onPageRendered, pageIndex],
   );
 
-  // Deselect only when the press lands on bare page space. Overlay presses
-  // (body, react-rnd resize handles, delete) all originate inside the
-  // `.signature-overlay-rnd` root, so `.closest` filters them out without the
-  // overlay needing stopPropagation (which would break react-draggable).
-  const handlePageMouseDown = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      if ((e.target as HTMLElement).closest(`.${OVERLAY_RND_CLASS}`)) return;
-      onDeselect();
-    },
-    [onDeselect],
-  );
-
   return (
     <div className="flex flex-col items-center gap-1">
       {/* position: relative establishes the positioning context for the
           absolutely-positioned react-rnd overlays. The container is always
           `containerWidth` wide and shrink-wraps to the rendered canvas (or
           placeholder) height, so overlay px coordinates map 1:1.
-          onMouseDown deselects, but only for clicks on bare page space — see
-          handlePageMouseDown's `.closest` guard. */}
+          Click-to-deselect lives on the scroll container (<main>), not here, so
+          clicks on the gutter/captions deselect too. */}
       <div
         ref={elCallback}
         data-page-index={pageIndex}
         className="relative"
         style={{ width: containerWidth }}
-        onMouseDown={handlePageMouseDown}
       >
         {active ? (
           <PDFPageRenderer
