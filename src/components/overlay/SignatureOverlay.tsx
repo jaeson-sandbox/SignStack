@@ -10,6 +10,10 @@ import {
 } from "react-rnd";
 import { X } from "lucide-react";
 import type { Overlay } from "@/types";
+import { OVERLAY_RND_CLASS } from "@/lib/overlay/overlayDom";
+
+// Re-exported for existing importers; canonical definition lives in lib/overlay/overlayDom.
+export { OVERLAY_RND_CLASS };
 
 interface SignatureOverlayProps {
   /**
@@ -35,10 +39,6 @@ interface SignatureOverlayProps {
   ) => void;
 }
 
-/** Class on the react-rnd root — used by the page deselect handler to tell an
- *  overlay click (anywhere inside, including react-rnd's resize handles) from a
- *  click on bare page space. */
-export const OVERLAY_RND_CLASS = "signature-overlay-rnd";
 /** Class on the delete button — react-rnd `cancel` target so a delete press
  *  never starts a drag. */
 const OVERLAY_DELETE_CLASS = "signature-overlay-delete";
