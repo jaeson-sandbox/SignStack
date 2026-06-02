@@ -44,6 +44,26 @@ export function isDeleteKey(key: string): boolean {
   return key === "Delete" || key === "Backspace";
 }
 
+/** Minimal shape of the keyboard event fields the command detectors read. */
+export interface KeyCommandEvent {
+  key: string;
+  ctrlKey: boolean;
+  metaKey: boolean;
+}
+
+/**
+ * Copy command: Ctrl+C (Windows/Linux) or Cmd+C (macOS). Matches `key` case-
+ * insensitively so it works regardless of Shift/CapsLock state.
+ */
+export function isCopyCommand(event: KeyCommandEvent): boolean {
+  return (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c";
+}
+
+/** Paste command: Ctrl+V (Windows/Linux) or Cmd+V (macOS). */
+export function isPasteCommand(event: KeyCommandEvent): boolean {
+  return (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v";
+}
+
 /**
  * Clamp a position so an overlay of `size` stays fully inside a page of
  * `pageDimPx`. If the overlay is larger than the page on an axis, that axis

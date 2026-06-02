@@ -5,7 +5,9 @@ import {
   arrowKeyToDirection,
   clampOverlayPosition,
   computeNudgedPosition,
+  isCopyCommand,
   isDeleteKey,
+  isPasteCommand,
   isTypingTarget,
   type NudgeDirection,
 } from "@/lib/overlay/overlayKeyboard";
@@ -38,6 +40,48 @@ describe("isDeleteKey", () => {
     expect(isDeleteKey("Backspace")).toBe(true);
     expect(isDeleteKey("ArrowLeft")).toBe(false);
     expect(isDeleteKey("x")).toBe(false);
+  });
+});
+
+describe("isCopyCommand", () => {
+  it("matches Ctrl+C (Windows/Linux)", () => {
+    expect(isCopyCommand({ key: "c", ctrlKey: true, metaKey: false })).toBe(true);
+  });
+
+  it("matches Cmd+C (macOS)", () => {
+    expect(isCopyCommand({ key: "c", ctrlKey: false, metaKey: true })).toBe(true);
+  });
+
+  it("is case-insensitive on the key (Shift/CapsLock)", () => {
+    expect(isCopyCommand({ key: "C", ctrlKey: true, metaKey: false })).toBe(true);
+  });
+
+  it("does not match C without a modifier", () => {
+    expect(isCopyCommand({ key: "c", ctrlKey: false, metaKey: false })).toBe(false);
+  });
+
+  it("does not match other modified keys", () => {
+    expect(isCopyCommand({ key: "v", ctrlKey: true, metaKey: false })).toBe(false);
+    expect(isCopyCommand({ key: "a", ctrlKey: true, metaKey: false })).toBe(false);
+  });
+});
+
+describe("isPasteCommand", () => {
+  it("matches Ctrl+V and Cmd+V", () => {
+    expect(isPasteCommand({ key: "v", ctrlKey: true, metaKey: false })).toBe(true);
+    expect(isPasteCommand({ key: "v", ctrlKey: false, metaKey: true })).toBe(true);
+  });
+
+  it("is case-insensitive on the key", () => {
+    expect(isPasteCommand({ key: "V", ctrlKey: false, metaKey: true })).toBe(true);
+  });
+
+  it("does not match V without a modifier", () => {
+    expect(isPasteCommand({ key: "v", ctrlKey: false, metaKey: false })).toBe(false);
+  });
+
+  it("does not match the copy key", () => {
+    expect(isPasteCommand({ key: "c", ctrlKey: true, metaKey: false })).toBe(false);
   });
 });
 

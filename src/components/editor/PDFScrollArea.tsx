@@ -17,6 +17,7 @@ import {
 import { overlaysForPage } from "@/lib/overlay/overlaySelectors";
 import { isOverlayEventTarget } from "@/lib/overlay/overlayDom";
 import { useKeyboardOverlay } from "@/hooks/useKeyboardOverlay";
+import { useOverlayClipboard } from "@/hooks/useOverlayClipboard";
 import { SignatureOverlay } from "@/components/overlay/SignatureOverlay";
 import type { Overlay } from "@/types";
 import { PDFPageRenderer } from "./PDFPageRenderer";
@@ -240,6 +241,17 @@ export function PDFScrollArea() {
   useKeyboardOverlay({
     selectedOverlay,
     pageDimPx: selectedOverlayPageDimPx,
+    isModalOpen: state.ui.isSignatureModalOpen,
+    dispatch,
+  });
+
+  // Copy/paste for the selected overlay (Story 5.6). Sibling of the keyboard
+  // hook above; shares the same pure guards (isTypingTarget) and clamp. The
+  // in-memory clipboard lives inside the hook (a ref) — never the OS clipboard.
+  useOverlayClipboard({
+    selectedOverlay,
+    currentVisiblePageIndex: state.currentVisiblePageIndex,
+    pageDimensionsPx: state.document.pageDimensionsPx,
     isModalOpen: state.ui.isSignatureModalOpen,
     dispatch,
   });
