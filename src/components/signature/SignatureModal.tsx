@@ -5,6 +5,7 @@ import { X } from "lucide-react";
 import { useAppState } from "@/store/useAppState";
 import { useOverlays } from "@/hooks/useOverlays";
 import { captureDrawnSignature } from "@/lib/signature/captureDrawnSignature";
+import { resolveSignaturePlacement } from "@/lib/signature/signaturePlacement";
 import { DrawTab, type DrawTabHandle } from "./DrawTab";
 import { TypeTab, type TypeTabHandle } from "./TypeTab";
 
@@ -36,44 +37,68 @@ export function SignatureModal() {
   const typeTabRef = useRef<TypeTabHandle | null>(null);
 
   const isOpen = state.ui.isSignatureModalOpen;
+  const existingSignatureDataUrl = state.signature.dataUrl;
+  const hasExistingSignature = existingSignatureDataUrl !== null;
+  // True when the user has drawn/typed something new this open. Reuse mode is
+  // when this is false but a session signature already exists (Story 6.2).
+  const hasNewInput =
+    activeTab === "draw" ? !drawnIsEmpty : typedCanCapture;
+  // Use Signature is enabled when there's something to place: new input, or an
+  // existing session signature to reuse.
+  const canConfirm = hasNewInput || hasExistingSignature;
 
   const close = useCallback(() => {
     dispatch({ type: "SIGNATURE_MODAL_CLOSE" });
   }, [dispatch]);
 
   const handleConfirm = useCallback(() => {
-    let dataUrl: string | null = null;
-    let signatureType: "drawn" | "typed" | null = null;
-
-    if (activeTab === "draw") {
-      const canvas = drawTabRef.current?.getCanvas();
-      if (canvas) {
-        dataUrl = captureDrawnSignature(canvas);
-        signatureType = "drawn";
+    // Capture freshly drawn/typed input only when there is some; otherwise the
+    // user is reusing the existing session signature (Story 6.2 "Add Another").
+    let captured: { dataUrl: string; type: "drawn" | "typed" } | null = null;
+    if (hasNewInput) {
+      if (activeTab === "draw") {
+        const canvas = drawTabRef.current?.getCanvas();
+        const drawn = canvas ? captureDrawnSignature(canvas) : null;
+        if (drawn) captured = { dataUrl: drawn, type: "drawn" };
+      } else {
+        const typed = typeTabRef.current?.capture() ?? null;
+        if (typed) captured = { dataUrl: typed, type: "typed" };
       }
-    } else {
-      dataUrl = typeTabRef.current?.capture() ?? null;
-      signatureType = "typed";
     }
 
-    if (!dataUrl || !signatureType) return;
-    dispatch({
-      type: "SIGNATURE_CREATED",
-      payload: { dataUrl, type: signatureType },
-    });
+    const decision = resolveSignaturePlacement(
+      captured?.dataUrl ?? null,
+      existingSignatureDataUrl,
+    );
+    if (!decision) return;
 
-    // Place the overlay on the currently most-visible page.
-    // If page dimensions haven't been measured yet (page not yet rendered),
-    // skip placement — user can re-open the modal to add another overlay once
-    // the page renders (Story 6.2 revisits this flow).
+    // Only a freshly created signature updates the session signature. Reuse
+    // leaves state.signature (and every previously placed overlay) untouched.
+    if (decision.isNewSignature && captured) {
+      dispatch({
+        type: "SIGNATURE_CREATED",
+        payload: { dataUrl: captured.dataUrl, type: captured.type },
+      });
+    }
+
+    // Place the overlay on the currently most-visible page. If the page hasn't
+    // been measured yet (not rendered), skip — only reachable before the page
+    // the user is on has rendered, which doesn't happen for a scrolled-to page.
     const pageIndex = state.currentVisiblePageIndex ?? 0;
     const pageDimPx = state.document.pageDimensionsPx.get(pageIndex);
     if (pageDimPx) {
-      void addOverlay(pageIndex, pageDimPx, dataUrl);
+      void addOverlay(pageIndex, pageDimPx, decision.dataUrl);
     }
 
     dispatch({ type: "SIGNATURE_MODAL_CLOSE" });
-  }, [activeTab, dispatch, state, addOverlay]);
+  }, [
+    activeTab,
+    hasNewInput,
+    existingSignatureDataUrl,
+    dispatch,
+    state,
+    addOverlay,
+  ]);
 
   // Reset transient draw-tab state whenever the modal flips false → true.
   // Uses React's "store previous input" pattern (set state during render when
@@ -180,6 +205,41 @@ export function SignatureModal() {
           </button>
         </header>
 
+        {/* Story 6.2 — reuse the current session signature. Shown only after a
+            signature exists. Type-agnostic: a drawn OR typed signature is just a
+            PNG data URL, so we preview the image directly (we don't store the
+            typed text/font). Pressing Use Signature with no new drawing/typing
+            places this signature again on the current page. */}
+        {hasExistingSignature && existingSignatureDataUrl ? (
+          <div
+            className="mb-4 flex items-center gap-3 rounded-md border p-3"
+            style={{
+              borderColor: "var(--color-border)",
+              backgroundColor: "var(--color-bg)",
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element --
+                In-memory PNG data URL, not a network/file asset — next/image has
+                nothing to optimize. Same rationale as SignatureOverlay (AD-4). */}
+            <img
+              src={existingSignatureDataUrl}
+              alt="Current signature"
+              className="h-12 rounded border bg-white object-contain"
+              style={{ borderColor: "var(--color-border)", maxWidth: 200 }}
+            />
+            <p
+              className="text-sm"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Your current signature. Press{" "}
+              <span style={{ color: "var(--color-text-primary)" }}>
+                Use Signature
+              </span>{" "}
+              to place it again, or create a new one below.
+            </p>
+          </div>
+        ) : null}
+
         <div
           role="tablist"
           aria-label="Signature creation mode"
@@ -227,12 +287,10 @@ export function SignatureModal() {
             Cancel
           </button>
           <UseSignatureButton
-            // In Draw tab: disabled until strokes exist.
-            // In Type tab: disabled until text exists AND fonts have loaded
-            // (TypeTab's canCapture combines both conditions).
-            disabled={
-              activeTab === "draw" ? drawnIsEmpty : !typedCanCapture
-            }
+            // Enabled when there's something to place: new input (Draw: strokes
+            // exist; Type: text exists AND fonts loaded) OR an existing session
+            // signature to reuse (Story 6.2).
+            disabled={!canConfirm}
             onConfirm={handleConfirm}
           />
         </footer>

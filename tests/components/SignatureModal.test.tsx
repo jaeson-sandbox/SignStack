@@ -31,6 +31,14 @@ vi.mock("@/lib/signature/typedSignatureRenderer", () => ({
   }) => `data:image/png;base64,FAKE_TYPED|${text}|${fontFamily}`,
 }));
 
+// Story 6.2: mock the overlay placement hook so confirm/reuse can assert which
+// dataUrl gets placed without depending on the async Image aspect-ratio probe
+// (jsdom doesn't decode data-URL images).
+const { addOverlaySpy } = vi.hoisted(() => ({ addOverlaySpy: vi.fn() }));
+vi.mock("@/hooks/useOverlays", () => ({
+  useOverlays: () => ({ addOverlay: addOverlaySpy }),
+}));
+
 interface FakeSignatureCanvas {
   _isEmpty: boolean;
   isEmpty(): boolean;
@@ -91,6 +99,31 @@ function OpenButton() {
   );
 }
 
+// Seeds a page's rendered dimensions + makes it the current visible page so the
+// modal's placement branch (addOverlay) actually fires. Without this the confirm
+// flow still dispatches SIGNATURE_CREATED but skips placement. Two buttons let a
+// test simulate scrolling between pages (multi-page signing).
+function Seeder() {
+  const { dispatch } = useAppState();
+  const seed = (pageIndex: number, widthPx: number, heightPx: number) => {
+    dispatch({
+      type: "PAGE_DIMENSIONS_SET",
+      payload: { pageIndex, widthPx, heightPx },
+    });
+    dispatch({ type: "CURRENT_PAGE_CHANGED", payload: { pageIndex } });
+  };
+  return (
+    <>
+      <button type="button" onClick={() => seed(0, 794, 1028)}>
+        seed-page-0
+      </button>
+      <button type="button" onClick={() => seed(2, 600, 800)}>
+        seed-page-2
+      </button>
+    </>
+  );
+}
+
 function SignatureProbe() {
   const { state } = useAppState();
   return (
@@ -105,10 +138,19 @@ function renderModal() {
   return render(
     <AppProvider>
       <OpenButton />
+      <Seeder />
       <SignatureModal />
       <SignatureProbe />
     </AppProvider>,
   );
+}
+
+function seedPage0() {
+  fireEvent.click(screen.getByRole("button", { name: "seed-page-0" }));
+}
+
+function seedPage2() {
+  fireEvent.click(screen.getByRole("button", { name: "seed-page-2" }));
 }
 
 function openModal() {
@@ -129,6 +171,7 @@ function simulateStroke() {
 
 beforeEach(() => {
   mountedInstances.length = 0;
+  addOverlaySpy.mockReset();
 });
 
 describe("<SignatureModal /> — shell", () => {
@@ -286,15 +329,19 @@ describe("<SignatureModal /> — drawn signature flow", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("on reopen, the canvas resets and Use Signature is disabled again", () => {
+  it("on reopen with an existing signature, the canvas resets but Use Signature stays enabled for reuse (Story 6.2)", () => {
     renderModal();
     openModal();
     simulateStroke();
     fireEvent.click(screen.getByRole("button", { name: /use signature/i }));
 
-    // Reopen — new SignatureCanvas instance mounted; Use Signature disabled.
+    // Reopen — a fresh empty canvas is mounted, but because a session signature
+    // now exists it can be reused, so Use Signature stays enabled.
     openModal();
-    expect(screen.getByRole("button", { name: /use signature/i })).toBeDisabled();
+    expect(getLatestCanvas().isEmpty()).toBe(true);
+    expect(
+      screen.getByRole("button", { name: /use signature/i }),
+    ).toBeEnabled();
   });
 });
 
@@ -375,5 +422,131 @@ describe("<SignatureModal /> — typed signature flow", () => {
     });
 
     expect(screen.getByRole("button", { name: /use signature/i })).toBeDisabled();
+  });
+});
+
+describe("<SignatureModal /> — Story 6.2 reuse / add another", () => {
+  it("shows no current-signature preview and disables Use Signature on the very first open", () => {
+    renderModal();
+    openModal();
+    expect(screen.queryByAltText("Current signature")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /use signature/i }),
+    ).toBeDisabled();
+  });
+
+  it("shows the existing signature as a preview when reopened", () => {
+    renderModal();
+    openModal();
+    simulateStroke();
+    fireEvent.click(screen.getByRole("button", { name: /use signature/i }));
+
+    openModal();
+    const preview = screen.getByAltText("Current signature");
+    expect(preview).toBeInTheDocument();
+    expect(preview).toHaveAttribute(
+      "src",
+      "data:image/png;base64,FAKE_DRAWN_SIGNATURE",
+    );
+  });
+
+  it("places the first overlay on confirm using the captured signature", () => {
+    renderModal();
+    seedPage0();
+    openModal();
+    simulateStroke();
+    fireEvent.click(screen.getByRole("button", { name: /use signature/i }));
+
+    expect(addOverlaySpy).toHaveBeenCalledTimes(1);
+    expect(addOverlaySpy).toHaveBeenCalledWith(
+      0,
+      { width: 794, height: 1028 },
+      "data:image/png;base64,FAKE_DRAWN_SIGNATURE",
+    );
+  });
+
+  it("reuses the existing signature on confirm without re-creating it", () => {
+    renderModal();
+    seedPage0();
+
+    // First placement creates the session signature + overlay #1.
+    openModal();
+    simulateStroke();
+    fireEvent.click(screen.getByRole("button", { name: /use signature/i }));
+    expect(addOverlaySpy).toHaveBeenCalledTimes(1);
+
+    // Reopen and confirm with NO new stroke -> reuse path.
+    openModal();
+    fireEvent.click(screen.getByRole("button", { name: /use signature/i }));
+
+    // A second overlay is placed with the SAME (existing) dataUrl.
+    expect(addOverlaySpy).toHaveBeenCalledTimes(2);
+    expect(addOverlaySpy).toHaveBeenLastCalledWith(
+      0,
+      { width: 794, height: 1028 },
+      "data:image/png;base64,FAKE_DRAWN_SIGNATURE",
+    );
+    // Session signature is unchanged by reuse (still the original drawn one).
+    const probe = screen.getByTestId("signature-probe");
+    expect(probe).toHaveTextContent("data:image/png;base64,FAKE_DRAWN_SIGNATURE");
+    expect(probe).toHaveTextContent("|drawn|");
+    expect(probe).toHaveTextContent("|closed");
+  });
+
+  it("reuse places the overlay on the page the user has scrolled to (multi-page)", () => {
+    renderModal();
+
+    // Create + place on page 0.
+    seedPage0();
+    openModal();
+    simulateStroke();
+    fireEvent.click(screen.getByRole("button", { name: /use signature/i }));
+    expect(addOverlaySpy).toHaveBeenLastCalledWith(
+      0,
+      { width: 794, height: 1028 },
+      "data:image/png;base64,FAKE_DRAWN_SIGNATURE",
+    );
+
+    // Scroll to page 2 (measure it + make it current), then reopen and reuse.
+    seedPage2();
+    openModal();
+    fireEvent.click(screen.getByRole("button", { name: /use signature/i }));
+
+    // The reused overlay lands on page 2 with that page's own dimensions.
+    expect(addOverlaySpy).toHaveBeenCalledTimes(2);
+    expect(addOverlaySpy).toHaveBeenLastCalledWith(
+      2,
+      { width: 600, height: 800 },
+      "data:image/png;base64,FAKE_DRAWN_SIGNATURE",
+    );
+  });
+
+  it("drawing a new signature after reopen replaces the session signature", async () => {
+    renderModal();
+    seedPage0();
+
+    // Create a typed signature first (await the font-load + canCapture effect).
+    openModal();
+    fireEvent.click(screen.getByRole("tab", { name: "Type" }));
+    fireEvent.change(screen.getByLabelText(/your name/i), {
+      target: { value: "Alex" },
+    });
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: /use signature/i }));
+
+    // Reopen on the Draw tab, draw a NEW stroke, confirm -> replaces session.
+    openModal();
+    fireEvent.click(screen.getByRole("tab", { name: "Draw" }));
+    simulateStroke();
+    fireEvent.click(screen.getByRole("button", { name: /use signature/i }));
+
+    const probe = screen.getByTestId("signature-probe");
+    expect(probe).toHaveTextContent("data:image/png;base64,FAKE_DRAWN_SIGNATURE");
+    expect(probe).toHaveTextContent("|drawn|");
+    expect(addOverlaySpy).toHaveBeenLastCalledWith(
+      0,
+      { width: 794, height: 1028 },
+      "data:image/png;base64,FAKE_DRAWN_SIGNATURE",
+    );
   });
 });
