@@ -99,6 +99,7 @@ export function UploadZone() {
           role="button"
           tabIndex={0}
           aria-label="Upload a PDF — drop a file or click to browse"
+          aria-describedby="upload-constraints"
           onClick={openPicker}
           onKeyDown={handleKeyDown}
           onDragEnter={handleDragEnter}
@@ -133,7 +134,7 @@ export function UploadZone() {
                 event.stopPropagation();
                 openPicker();
               }}
-              className="rounded px-3 py-1.5 font-medium cursor-pointer"
+              className="rounded px-3 py-1.5 font-medium cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
               style={{
                 backgroundColor: "var(--color-accent)",
                 color: "var(--color-surface)",
@@ -143,7 +144,11 @@ export function UploadZone() {
             </button>
           </p>
 
-          <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+          <p
+            id="upload-constraints"
+            className="text-xs"
+            style={{ color: "var(--color-text-muted)" }}
+          >
             PDF files only · Max 25 MB
           </p>
         </div>
