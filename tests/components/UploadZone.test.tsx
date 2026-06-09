@@ -46,10 +46,11 @@ describe("<UploadZone /> — upload validation wiring", () => {
     expect(alert).toHaveTextContent(
       "This file is not a PDF. Please select a PDF file.",
     );
-    // The helper text is replaced by the alert when an error is present.
+    // The error now appears in a dismissible banner below the zone (UX-DR1);
+    // the empty-state helper text stays visible.
     expect(
-      screen.queryByText("PDF files only · Max 25 MB"),
-    ).not.toBeInTheDocument();
+      screen.getByText("PDF files only · Max 25 MB"),
+    ).toBeInTheDocument();
   });
 
   it("shows an inline error when the file lacks a %PDF header", async () => {
@@ -87,6 +88,22 @@ describe("<UploadZone /> — upload validation wiring", () => {
     await waitFor(() => {
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
+    expect(screen.getByText("PDF files only · Max 25 MB")).toBeInTheDocument();
+  });
+
+  it("dismissing the error banner clears it and keeps the zone active", async () => {
+    renderUploadZone();
+    const bad = new File(["x"], "bad.txt", { type: "text/plain" });
+    await selectFileViaPicker(bad);
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /dismiss error/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+    // Zone stays active for retry: the drop target and helper remain.
+    expect(screen.getByText("Drop your PDF here")).toBeInTheDocument();
     expect(screen.getByText("PDF files only · Max 25 MB")).toBeInTheDocument();
   });
 });

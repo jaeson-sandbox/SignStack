@@ -413,6 +413,16 @@ describe("appReducer — EXPORT_*", () => {
     expect(next.ui.isExporting).toBe(false);
     expect(next.ui.exportError).toBe("Failed to write PDF");
   });
+
+  it("EXPORT_ERROR_CLEAR nulls ui.exportError without touching isExporting", () => {
+    const seeded: AppState = {
+      ...initialState,
+      ui: { ...initialState.ui, exportError: "boom", isExporting: false },
+    };
+    const next = appReducer(seeded, { type: "EXPORT_ERROR_CLEAR" });
+    expect(next.ui.exportError).toBeNull();
+    expect(next.ui.isExporting).toBe(false);
+  });
 });
 
 describe("appReducer — UPLOAD_ERROR / UPLOAD_ERROR_CLEAR", () => {

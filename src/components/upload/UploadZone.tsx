@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { Upload } from "lucide-react";
 import { useAppState } from "@/store/useAppState";
 import { usePdfDocument } from "@/hooks/usePdfDocument";
+import { ErrorBanner } from "@/components/shared/ErrorBanner";
 
 type DragState = "idle" | "valid" | "invalid";
 
@@ -24,7 +25,7 @@ function dragValidity(event: React.DragEvent<HTMLDivElement>): DragState {
 }
 
 export function UploadZone() {
-  const { state } = useAppState();
+  const { state, dispatch } = useAppState();
   const { loadFile } = usePdfDocument();
   const [dragState, setDragState] = useState<DragState>("idle");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -142,20 +143,21 @@ export function UploadZone() {
             </button>
           </p>
 
-          {showError ? (
-            <p
-              role="alert"
-              className="text-sm"
-              style={{ color: "var(--color-danger)" }}
-            >
-              {uploadError}
-            </p>
-          ) : (
-            <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-              PDF files only · Max 25 MB
-            </p>
-          )}
+          <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+            PDF files only · Max 25 MB
+          </p>
         </div>
+
+        {/* Inline error below the zone (UX-DR1). Dismissible — clearing it
+            returns the zone to its default (non-red) state. The zone stays
+            active after an error so the user can retry without a refresh. */}
+        {showError && uploadError ? (
+          <ErrorBanner
+            message={uploadError}
+            onDismiss={() => dispatch({ type: "UPLOAD_ERROR_CLEAR" })}
+            className="mt-4"
+          />
+        ) : null}
 
         <input
           ref={fileInputRef}

@@ -77,5 +77,6 @@ export type AppAction =
   | { type: "EXPORT_START" }
   | { type: "EXPORT_SUCCESS" }
   | { type: "EXPORT_ERROR"; payload: { message: string } }
+  | { type: "EXPORT_ERROR_CLEAR" }
   | { type: "UPLOAD_ERROR"; payload: { message: string } }
   | { type: "UPLOAD_ERROR_CLEAR" };

@@ -16,6 +16,25 @@ function ModalStateProbe() {
   );
 }
 
+// Seeds an export error through the real reducer so the toolbar's dismissible
+// ErrorBanner can be exercised end-to-end (no dispatch mock).
+function ExportErrorSeeder() {
+  const { dispatch } = useAppState();
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        dispatch({
+          type: "EXPORT_ERROR",
+          payload: { message: "Export failed. Try again." },
+        })
+      }
+    >
+      seed-export-error
+    </button>
+  );
+}
+
 describe("<EditorToolbar />", () => {
   it("renders the SignStack wordmark and both action buttons", () => {
     render(
@@ -51,5 +70,24 @@ describe("<EditorToolbar />", () => {
     const download = screen.getByRole("button", { name: /download signed pdf/i });
     expect(download).toBeDisabled();
     expect(download).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("shows a dismissible export error banner and clears it on dismiss", () => {
+    render(
+      <AppProvider>
+        <EditorToolbar />
+        <ExportErrorSeeder />
+      </AppProvider>,
+    );
+    // No error banner before an export error exists.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "seed-export-error" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Export failed. Try again.",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /dismiss error/i }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
