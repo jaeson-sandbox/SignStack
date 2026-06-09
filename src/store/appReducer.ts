@@ -162,6 +162,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       };
     }
 
+    case "EXPORT_ERROR_CLEAR": {
+      return { ...state, ui: { ...state.ui, exportError: null } };
+    }
+
     case "UPLOAD_ERROR": {
       return {
         ...state,

@@ -19,6 +19,8 @@ import { isOverlayEventTarget } from "@/lib/overlay/overlayDom";
 import { useKeyboardOverlay } from "@/hooks/useKeyboardOverlay";
 import { useOverlayClipboard } from "@/hooks/useOverlayClipboard";
 import { SignatureOverlay } from "@/components/overlay/SignatureOverlay";
+import { Spinner } from "@/components/shared/Spinner";
+import { ErrorBanner } from "@/components/shared/ErrorBanner";
 import type { Overlay } from "@/types";
 import { PDFPageRenderer } from "./PDFPageRenderer";
 
@@ -283,6 +285,21 @@ export function PDFScrollArea() {
           file={fileProp}
           options={PDF_DOCUMENT_OPTIONS}
           onLoadSuccess={handleLoadSuccess}
+          // Shown while pdfjs parses the document — i.e. arrayBuffer is set but
+          // no page has rendered yet (Story 7.1 AC). react-pdf swaps it for the
+          // children once onLoadSuccess fires.
+          loading={
+            <div className="py-24">
+              <Spinner label="Loading your PDF…" />
+            </div>
+          }
+          // Shown if the document fails to parse (corrupt / unsupported). No
+          // reducer state needed — react-pdf renders this slot on load error.
+          error={
+            <div className="mx-auto max-w-md py-24">
+              <ErrorBanner message="This PDF could not be displayed. It may be corrupt or use an unsupported feature. Try a different file." />
+            </div>
+          }
         >
           {numPages !== null
             ? Array.from({ length: numPages }, (_, index) => (

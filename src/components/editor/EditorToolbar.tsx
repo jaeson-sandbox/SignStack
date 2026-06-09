@@ -3,6 +3,7 @@
 import { Plus, Download, Loader2 } from "lucide-react";
 import { useAppState } from "@/store/useAppState";
 import { useExport } from "@/hooks/useExport";
+import { ErrorBanner } from "@/components/shared/ErrorBanner";
 
 export function EditorToolbar() {
   const { state, dispatch } = useAppState();
@@ -73,13 +74,11 @@ export function EditorToolbar() {
           {isExporting ? "Exporting…" : "Download Signed PDF"}
         </button>
         {exportError ? (
-          <p
-            role="alert"
-            className="absolute right-0 top-full mt-1 whitespace-nowrap text-xs"
-            style={{ color: "var(--color-danger)" }}
-          >
-            {exportError}
-          </p>
+          <ErrorBanner
+            message={exportError}
+            onDismiss={() => dispatch({ type: "EXPORT_ERROR_CLEAR" })}
+            className="absolute right-0 top-full z-20 mt-2 w-80 max-w-[90vw] shadow-sm"
+          />
         ) : null}
       </div>
     </header>
