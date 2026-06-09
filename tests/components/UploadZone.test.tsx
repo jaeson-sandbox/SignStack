@@ -35,6 +35,27 @@ describe("<UploadZone /> — upload validation wiring", () => {
     expect(screen.getByText("PDF files only · Max 25 MB")).toBeInTheDocument();
   });
 
+  it("exposes a keyboard-reachable Browse button with an accessible name (Story 7.2)", () => {
+    renderUploadZone();
+    const browse = screen.getByRole("button", { name: /browse files/i });
+    // Native <button> — focusable by default (no negative tabindex override).
+    expect(browse).not.toHaveAttribute("tabindex", "-1");
+    browse.focus();
+    expect(browse).toHaveFocus();
+  });
+
+  it("describes the drop zone with its PDF/size constraints for screen readers (Story 7.2)", () => {
+    renderUploadZone();
+    const dropZone = screen.getByRole("button", {
+      name: /upload a pdf — drop a file or click to browse/i,
+    });
+    expect(dropZone).toHaveAttribute("aria-describedby", "upload-constraints");
+    expect(screen.getByText("PDF files only · Max 25 MB")).toHaveAttribute(
+      "id",
+      "upload-constraints",
+    );
+  });
+
   it("shows an inline error when a non-PDF is selected", async () => {
     renderUploadZone();
     const docx = new File(["not a pdf"], "resume.docx", {

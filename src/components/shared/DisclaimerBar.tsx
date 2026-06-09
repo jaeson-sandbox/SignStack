@@ -15,9 +15,10 @@ export function DisclaimerBar() {
       <div className="mx-auto flex max-w-5xl items-center justify-center gap-2">
         <Lock aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
         <p>
-          <span className="font-medium">Local only ·</span>{" "}
-          SignStack adds visual signatures to PDFs. It does not create
-          certificate-based digital signatures.
+          <span className="font-medium">Private by design ·</span>{" "}
+          Your PDF is opened, signed, and exported entirely in your browser —
+          it is never uploaded to a server or stored anywhere. SignStack adds
+          visual signatures, not certificate-based digital signatures.
         </p>
       </div>
     </footer>

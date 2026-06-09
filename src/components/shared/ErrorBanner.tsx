@@ -16,12 +16,16 @@ interface ErrorBannerProps {
  * duplicating the red-banner markup.
  *
  * `role="alert"` gives it an implicit assertive aria-live region, so screen
- * readers announce the message as soon as it appears (NFR-A1 / UX-DR13).
+ * readers announce the message as soon as it appears (NFR-A1 / UX-DR13). The
+ * explicit `aria-live="assertive"` + `aria-atomic` reinforce that behavior for
+ * AT/browser combos that don't fully honor the implicit mapping (Story 7.2).
  */
 export function ErrorBanner({ message, onDismiss, className }: ErrorBannerProps) {
   return (
     <div
       role="alert"
+      aria-live="assertive"
+      aria-atomic="true"
       className={`flex items-start gap-2 rounded-md border px-3 py-2 text-sm ${
         className ?? ""
       }`}

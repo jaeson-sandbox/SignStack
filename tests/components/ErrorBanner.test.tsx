@@ -11,6 +11,13 @@ describe("<ErrorBanner />", () => {
     expect(alert).toHaveTextContent("Something went wrong.");
   });
 
+  it("is an assertive, atomic live region so screen readers announce it (Story 7.2)", () => {
+    render(<ErrorBanner message="Announce me." />);
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveAttribute("aria-live", "assertive");
+    expect(alert).toHaveAttribute("aria-atomic", "true");
+  });
+
   it("renders no dismiss button when onDismiss is omitted", () => {
     render(<ErrorBanner message="No dismiss here." />);
     expect(
